@@ -1,1 +1,72 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Selfie Attendance</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div class="wrap">
+  <h1>Selfie Attendance</h1>
+  <p class="sub" id="tagline">Google se sign in karein, location aur selfie ke saath clock-in karein.</p>
 
+  <!-- LOGIN SECTION -->
+  <section id="authSection">
+    <button class="btn-google" id="googleLoginBtn">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.6-6 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l6-6C34.5 5.1 29.5 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.4-.1-2.5-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.8 1.1 8 3l6-6C34.5 6.1 29.5 4 24 4 16 4 9 8.4 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.4 0 10.3-1.9 14-5.7l-6.5-5.6C29.5 34.6 26.9 35.5 24 35.5c-5.3 0-9.8-3.4-11.4-8.1l-6.6 5.1C9 39.6 16 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H24v8h11.3c-.8 2.2-2.2 4.1-4.1 5.4l6.5 5.6C41.5 36.5 44 30.7 44 24c0-1.4-.1-2.5-.4-3.5z"/></svg>
+      Sign in with Google
+    </button>
+    <div class="status-msg" id="authStatus"></div>
+  </section>
+
+  <!-- MAIN APP (hidden until logged in) -->
+  <section id="mainSection" style="display:none;">
+    <div class="employee-card">
+      <div>
+        <div class="emp-name" id="empName">—</div>
+        <div class="emp-plant" id="empPlant">—</div>
+      </div>
+      <button class="btn-signout" id="signoutBtn">Sign out</button>
+    </div>
+
+    <div id="deviceWarning" class="warning-banner" style="display:none;">
+      Naya device detect hua hai. Yeh clock-in flag ho kar admin review mein jayega.
+    </div>
+
+    <div id="notRegistered" class="warning-banner" style="display:none;">
+      Aapka email employee list mein register nahi hai. Admin se contact karein.
+    </div>
+
+    <div class="camera-box">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="canvas" style="display:none;"></canvas>
+      <img id="selfiePreview" style="display:none;">
+    </div>
+
+    <button class="btn-primary" id="startCameraBtn">Camera Shuru Karein</button>
+    <button class="btn-mark" id="captureBtn" style="display:none;">📸 Selfie Le Kar Clock-In Karein</button>
+    <button class="btn-secondary" id="retakeBtn" style="display:none;">Retake</button>
+
+    <div class="status-msg" id="captureStatus"></div>
+
+    <div class="radar-box" id="radarBox" style="display:none;"></div>
+    <div class="result" id="result" style="display:none;">
+      <div class="distance" id="distanceVal"></div>
+      <div class="verdict" id="verdictVal"></div>
+    </div>
+
+    <button class="btn-mark" id="submitBtn" style="display:none;">Attendance Submit Karein</button>
+
+    <div class="history">
+      <h2>Recent Attendance</h2>
+      <div id="historyWrap"><div class="empty">Loading...</div></div>
+    </div>
+  </section>
+</div>
+
+<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
