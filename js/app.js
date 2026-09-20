@@ -66,15 +66,27 @@ function drawRadar(distance, radius, inRange) {
 }
 
 function getPosition() {
+  if (!navigator.geolocation) {
+    return Promise.reject(new Error("Is browser mein location support nahi hai."));
+  }
+  // First try: high accuracy GPS, 20s timeout.
   return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error("Is browser mein location support nahi hai."));
-      return;
-    }
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve(pos.coords),
-      (err) => reject(err),
-      { enableHighAccuracy: true, timeout: 15000 }
+      (err) => {
+        if (err.code === err.TIMEOUT) {
+          // Fallback: relax accuracy requirement, give it more time.
+          // This trades precision for a much higher chance of success indoors.
+          navigator.geolocation.getCurrentPosition(
+            (pos) => resolve(pos.coords),
+            (err2) => reject(err2),
+            { enableHighAccuracy: false, timeout: 30000, maximumAge: 60000 }
+          );
+        } else {
+          reject(err);
+        }
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
     );
   });
 }
