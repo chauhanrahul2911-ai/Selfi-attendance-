@@ -161,11 +161,11 @@ async function enterMode(mode) {
 
 async function loadEmployeeRecord() {
   if (currentEmployee) return;
-  const email = currentUser.email;
+  const email = (currentUser.email || "").trim().toLowerCase();
   const { data: emp } = await supabaseClient
     .from("employees")
     .select("*, plants(*)")
-    .eq("email", email)
+    .ilike("email", email)
     .eq("is_active", true)
     .maybeSingle();
   if (emp) {
