@@ -162,12 +162,16 @@ async function enterMode(mode) {
 async function loadEmployeeRecord() {
   if (currentEmployee) return;
   const email = (currentUser.email || "").trim().toLowerCase();
-  const { data: emp } = await supabaseClient
+  const { data: emp, error } = await supabaseClient
     .from("employees")
     .select("*, plants(*)")
     .ilike("email", email)
     .eq("is_active", true)
     .maybeSingle();
+
+  window.__debugEmail = email;
+  window.__debugError = error;
+
   if (emp) {
     currentEmployee = emp;
     currentPlant = emp.plants;
@@ -191,6 +195,11 @@ async function routeToMode(mode) {
     $("empName").textContent = currentUser.email;
     $("empPlant").textContent = "Not registered";
     $("clockInFlow").style.display = "none";
+    const dbg = window.__debugError
+      ? "Error: " + window.__debugError.message + " (code: " + (window.__debugError.code || "?") + ")"
+      : "Searched email: " + window.__debugEmail + " — koi matching row nahi mila (ya RLS ne block kiya).";
+    $("debugInfo").textContent = dbg;
+    $("debugInfo").style.display = "block";
     return;
   }
 
