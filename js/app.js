@@ -7,22 +7,48 @@ const supabaseClient = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABAS
 const $ = (id) => document.getElementById(id);
 
 let currentUser = null;      // supabase auth user
-let currentEmployee = null;  // row from employees table
+let currentEmployee = null;  // row from employees table (with joined plants)
 let currentPlant = null;     // row from plants table
 let mediaStream = null;
 let capturedBlob = null;
 let lastLocation = null;     // {lat, lng, accuracy}
 let lastDistance = null;
 let deviceMismatch = false;
+let todayAttendance = null;  // existing attendance row for today, if any
 
-// ---------- DEVICE ID ----------
-function getDeviceId() {
-  let id = localStorage.getItem("attendance_device_id");
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem("attendance_device_id", id);
-  }
+// ---------- DATE (India-local, regardless of device timezone) ----------
+function getTodayIST() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
+// ---------- DEVICE ID + FINGERPRINT ----------
+function readStoredDeviceId() {
+  return localStorage.getItem("attendance_device_id");
+}
+function writeDeviceId(id) {
+  localStorage.setItem("attendance_device_id", id);
   return id;
+}
+function ensureDeviceId() {
+  return readStoredDeviceId() || writeDeviceId(crypto.randomUUID());
+}
+// A soft fingerprint of the physical device/browser (survives clearing site
+// data / history, since it's derived from hardware+browser traits, not
+// stored state). Used as a fallback so clearing local storage doesn't turn
+// into a false "new device" flag on the same phone.
+function getDeviceFingerprint() {
+  const parts = [
+    navigator.userAgent || "",
+    (screen.width || 0) + "x" + (screen.height || 0),
+    Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+    navigator.language || "",
+    navigator.hardwareConcurrency || ""
+  ].join("|");
+  let hash = 0;
+  for (let i = 0; i < parts.length; i++) {
+    hash = (hash * 31 + parts.charCodeAt(i)) | 0;
+  }
+  return "fp_" + Math.abs(hash);
 }
 
 // ---------- DISTANCE ----------
@@ -69,14 +95,11 @@ function getPosition() {
   if (!navigator.geolocation) {
     return Promise.reject(new Error("Is browser mein location support nahi hai."));
   }
-  // First try: high accuracy GPS, 20s timeout.
   return new Promise((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve(pos.coords),
       (err) => {
         if (err.code === err.TIMEOUT) {
-          // Fallback: relax accuracy requirement, give it more time.
-          // This trades precision for a much higher chance of success indoors.
           navigator.geolocation.getCurrentPosition(
             (pos) => resolve(pos.coords),
             (err2) => reject(err2),
@@ -91,81 +114,191 @@ function getPosition() {
   });
 }
 
-// ---------- AUTH ----------
-$("googleLoginBtn").addEventListener("click", async () => {
-  $("authStatus").textContent = "Redirecting to Google...";
-  await supabaseClient.auth.signInWithOAuth({
-    provider: "google",
-    options: { redirectTo: window.location.href.split("#")[0] }
-  });
-});
+// ============================================
+// LANDING / MODE ROUTING
+// ============================================
+function hideAllSections() {
+  $("landingSection").style.display = "none";
+  $("employeeSection").style.display = "none";
+  $("viewerSection").style.display = "none";
+}
 
-$("signoutBtn").addEventListener("click", async () => {
-  stopCamera();
-  await supabaseClient.auth.signOut();
-  window.location.reload();
-});
+$("modeEmployeeBtn").addEventListener("click", () => enterMode("employee"));
+$("modeViewerBtn").addEventListener("click", () => enterMode("viewer"));
 
-async function initAuth() {
+document.querySelectorAll(".btn-back").forEach((b) =>
+  b.addEventListener("click", () => {
+    stopCamera();
+    sessionStorage.removeItem("attendance_mode");
+    hideAllSections();
+    $("landingSection").style.display = "block";
+  })
+);
+
+document.querySelectorAll(".btn-signout").forEach((b) =>
+  b.addEventListener("click", async () => {
+    stopCamera();
+    sessionStorage.removeItem("attendance_mode");
+    await supabaseClient.auth.signOut();
+    window.location.reload();
+  })
+);
+
+async function enterMode(mode) {
+  sessionStorage.setItem("attendance_mode", mode);
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (session) {
     currentUser = session.user;
-    await loadEmployee();
+    await routeToMode(mode);
   } else {
-    $("authSection").style.display = "block";
-    $("mainSection").style.display = "none";
+    $("landingStatus").textContent = "Redirecting to Google...";
+    await supabaseClient.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.href.split("#")[0] }
+    });
   }
 }
 
-async function loadEmployee() {
-  $("authSection").style.display = "none";
-  $("mainSection").style.display = "block";
-
+async function loadEmployeeRecord() {
+  if (currentEmployee) return;
   const email = currentUser.email;
-  const { data: emp, error } = await supabaseClient
+  const { data: emp } = await supabaseClient
     .from("employees")
     .select("*, plants(*)")
     .eq("email", email)
     .eq("is_active", true)
     .maybeSingle();
+  if (emp) {
+    currentEmployee = emp;
+    currentPlant = emp.plants;
+  }
+}
 
-  if (error || !emp) {
-    $("notRegistered").style.display = "block";
-    $("empName").textContent = email;
-    $("empPlant").textContent = "Not registered";
+async function routeToMode(mode) {
+  await loadEmployeeRecord();
+  hideAllSections();
+
+  if (mode === "viewer") {
+    await loadViewer();
     return;
   }
 
-  currentEmployee = emp;
-  currentPlant = emp.plants;
-  $("empName").textContent = emp.name;
+  // employee mode
+  $("employeeSection").style.display = "block";
+
+  if (!currentEmployee) {
+    $("notRegistered").style.display = "block";
+    $("empName").textContent = currentUser.email;
+    $("empPlant").textContent = "Not registered";
+    $("clockInFlow").style.display = "none";
+    return;
+  }
+
+  $("notRegistered").style.display = "none";
+  $("empName").textContent = currentEmployee.name;
   $("empPlant").textContent = currentPlant ? currentPlant.name : "No plant assigned";
 
   await checkDeviceBinding();
+  await checkTodayAttendance();
   await loadHistory();
 }
 
-// ---------- DEVICE BINDING ----------
-async function checkDeviceBinding() {
-  const myDeviceId = getDeviceId();
-
-  if (!currentEmployee.device_id) {
-    // first login on any device — bind it
-    await supabaseClient
-      .from("employees")
-      .update({ device_id: myDeviceId, device_locked: true })
-      .eq("id", currentEmployee.id);
-    currentEmployee.device_id = myDeviceId;
-    deviceMismatch = false;
-  } else if (currentEmployee.device_id !== myDeviceId) {
-    deviceMismatch = true;
-    $("deviceWarning").style.display = "block";
+async function initAuth() {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  const savedMode = sessionStorage.getItem("attendance_mode");
+  if (session && savedMode) {
+    currentUser = session.user;
+    await routeToMode(savedMode);
   } else {
-    deviceMismatch = false;
+    hideAllSections();
+    $("landingSection").style.display = "block";
   }
 }
 
-// ---------- CAMERA ----------
+supabaseClient.auth.onAuthStateChange((_event, session) => {
+  if (session && !currentUser) {
+    currentUser = session.user;
+    const savedMode = sessionStorage.getItem("attendance_mode") || "employee";
+    routeToMode(savedMode);
+  }
+});
+
+// ============================================
+// DEVICE BINDING (with fingerprint fallback)
+// ============================================
+async function checkDeviceBinding() {
+  const storedId = readStoredDeviceId();
+  const fingerprint = getDeviceFingerprint();
+  $("deviceWarning").style.display = "none";
+  deviceMismatch = false;
+
+  if (!currentEmployee.device_id) {
+    const myId = ensureDeviceId();
+    await supabaseClient
+      .from("employees")
+      .update({ device_id: myId, device_fingerprint: fingerprint, device_locked: true })
+      .eq("id", currentEmployee.id);
+    currentEmployee.device_id = myId;
+    currentEmployee.device_fingerprint = fingerprint;
+    return;
+  }
+
+  if (storedId && storedId === currentEmployee.device_id) {
+    return; // exact match, all good
+  }
+
+  // Local storage id missing or different — before flagging, check if this
+  // is still the same physical device (site data / history was cleared).
+  if (fingerprint && fingerprint === currentEmployee.device_fingerprint) {
+    const myId = ensureDeviceId();
+    if (myId !== currentEmployee.device_id) {
+      await supabaseClient
+        .from("employees")
+        .update({ device_id: myId })
+        .eq("id", currentEmployee.id);
+      currentEmployee.device_id = myId;
+    }
+    return; // same device, silently re-bound
+  }
+
+  // Genuinely a different device.
+  ensureDeviceId();
+  deviceMismatch = true;
+  $("deviceWarning").style.display = "block";
+}
+
+// ============================================
+// ONE CLOCK-IN PER DAY
+// ============================================
+async function checkTodayAttendance() {
+  const today = getTodayIST();
+  const { data } = await supabaseClient
+    .from("attendance")
+    .select("*")
+    .eq("employee_id", currentEmployee.id)
+    .eq("attendance_date", today)
+    .maybeSingle();
+
+  todayAttendance = data || null;
+
+  if (todayAttendance) {
+    $("clockInFlow").style.display = "none";
+    $("alreadyMarked").style.display = "block";
+    $("alreadyMarkedTime").textContent = new Date(
+      todayAttendance.clock_in_time
+    ).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+    const statusLabel =
+      todayAttendance.status === "ok" ? "(OK)" : "(Review ke liye flag hui)";
+    $("alreadyMarkedStatus").textContent = statusLabel;
+  } else {
+    $("alreadyMarked").style.display = "none";
+    $("clockInFlow").style.display = "block";
+  }
+}
+
+// ============================================
+// CAMERA
+// ============================================
 $("startCameraBtn").addEventListener("click", startCamera);
 $("retakeBtn").addEventListener("click", retake);
 $("captureBtn").addEventListener("click", captureSelfie);
@@ -186,8 +319,15 @@ async function startCamera() {
     $("captureBtn").style.display = "block";
     $("captureStatus").textContent = "";
   } catch (e) {
-    $("captureStatus").textContent =
-      "Camera access nahi mila: " + (e.message || "permission denied");
+    if (e.name === "NotAllowedError") {
+      $("captureStatus").textContent =
+        "Camera block hai. Address bar ke lock/info icon par tap karke Site Settings mein Camera ko 'Allow' karo, phir page reload karo.";
+    } else if (e.name === "NotFoundError") {
+      $("captureStatus").textContent = "Is device mein camera nahi mila.";
+    } else {
+      $("captureStatus").textContent =
+        "Camera access nahi mila: " + (e.message || "unknown error");
+    }
   }
 }
 
@@ -212,10 +352,11 @@ function retake() {
 }
 
 async function captureSelfie() {
+  if (todayAttendance) return; // safety guard
+
   const video = $("video");
   const canvas = $("canvas");
 
-  // Resize down for compression (max width 480px)
   const scale = Math.min(1, 480 / video.videoWidth);
   canvas.width = video.videoWidth * scale;
   canvas.height = video.videoHeight * scale;
@@ -263,29 +404,24 @@ async function captureSelfie() {
     $("captureStatus").textContent = "";
     $("result").style.display = "block";
     $("distanceVal").textContent = formatDistance(distance);
-    $("verdictVal").textContent = inRange
-      ? "Plant range ke andar"
-      : "Plant range se bahar";
+    $("verdictVal").textContent = inRange ? "Plant range ke andar" : "Plant range se bahar";
     $("verdictVal").className = "verdict " + (inRange ? "in" : "out");
 
     $("radarBox").style.display = "flex";
-    $("radarBox").innerHTML = drawRadar(
-      distance,
-      currentPlant.radius_meters,
-      inRange
-    );
+    $("radarBox").innerHTML = drawRadar(distance, currentPlant.radius_meters, inRange);
 
     $("submitBtn").style.display = "block";
   } catch (e) {
     $("captureStatus").textContent =
-      "Location nahi mil payi: " +
-      (e.message || "permission denied. Location allow karein.");
+      "Location nahi mil payi: " + (e.message || "permission denied. Location allow karein.");
   }
 }
 
-// ---------- SUBMIT ----------
+// ============================================
+// SUBMIT ATTENDANCE
+// ============================================
 async function submitAttendance() {
-  if (!capturedBlob || !lastLocation) return;
+  if (!capturedBlob || !lastLocation || todayAttendance) return;
   $("submitBtn").disabled = true;
   $("captureStatus").textContent = "Attendance submit ho rahi hai...";
 
@@ -298,22 +434,20 @@ async function submitAttendance() {
     if (uploadError) throw uploadError;
 
     const inRange = lastDistance <= currentPlant.radius_meters;
-    // Low-confidence GPS reading gets flagged for manual review, same as a
-    // device mismatch — neither blocks the punch, both surface it later.
     const lowAccuracy = lastLocation.accuracy > 50;
-    const status =
-      deviceMismatch || lowAccuracy || !inRange ? "flagged" : "ok";
+    const status = deviceMismatch || lowAccuracy || !inRange ? "flagged" : "ok";
 
     const { error: insertError } = await supabaseClient.from("attendance").insert({
       employee_id: currentEmployee.id,
       plant_id: currentPlant.id,
+      attendance_date: getTodayIST(),
       latitude: lastLocation.lat,
       longitude: lastLocation.lng,
       gps_accuracy: lastLocation.accuracy,
       distance_meters: lastDistance,
       within_range: inRange,
       selfie_url: fileName,
-      device_id: getDeviceId(),
+      device_id: ensureDeviceId(),
       device_mismatch_flag: deviceMismatch,
       status
     });
@@ -328,15 +462,24 @@ async function submitAttendance() {
     $("retakeBtn").style.display = "none";
     $("startCameraBtn").style.display = "block";
     alert("Attendance mark ho gayi ✔");
+    await checkTodayAttendance();
     await loadHistory();
   } catch (e) {
-    $("captureStatus").textContent = "Submit fail hua: " + (e.message || e);
+    if (e.code === "23505") {
+      // Unique constraint caught a race (e.g. double tap) — not a real error.
+      $("captureStatus").textContent = "Aaj already clock-in ho chuki hai.";
+      await checkTodayAttendance();
+    } else {
+      $("captureStatus").textContent = "Submit fail hua: " + (e.message || e);
+    }
   } finally {
     $("submitBtn").disabled = false;
   }
 }
 
-// ---------- HISTORY ----------
+// ============================================
+// EMPLOYEE HISTORY
+// ============================================
 async function loadHistory() {
   const wrap = $("historyWrap");
   const { data, error } = await supabaseClient
@@ -357,7 +500,8 @@ async function loadHistory() {
       const label = r.status === "ok" ? "OK" : r.status === "flagged" ? "Flagged" : r.status;
       return `
       <tr>
-        <td>${new Date(r.clock_in_time).toLocaleString("en-IN")}</td>
+        <td>${new Date(r.clock_in_time).toLocaleDateString("en-IN")}</td>
+        <td>${new Date(r.clock_in_time).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</td>
         <td>${formatDistance(r.distance_meters)}</td>
         <td><span class="tag ${tagClass}">${label}</span></td>
       </tr>`;
@@ -366,17 +510,136 @@ async function loadHistory() {
 
   wrap.innerHTML = `
     <table>
-      <thead><tr><th>Time</th><th>Distance</th><th>Status</th></tr></thead>
+      <thead><tr><th>Date</th><th>Time</th><th>Distance</th><th>Status</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 }
 
-// ---------- INIT ----------
-supabaseClient.auth.onAuthStateChange((_event, session) => {
-  if (session && !currentUser) {
-    currentUser = session.user;
-    loadEmployee();
+// ============================================
+// VIEWER DASHBOARD
+// ============================================
+async function loadViewer() {
+  $("viewerSection").style.display = "block";
+
+  if (!currentEmployee || !currentEmployee.is_admin) {
+    $("viewerDenied").style.display = "block";
+    $("viewerContent").style.display = "none";
+    return;
   }
+
+  $("viewerDenied").style.display = "none";
+  $("viewerContent").style.display = "block";
+
+  if (!$("dateFilter").value) {
+    $("dateFilter").value = getTodayIST();
+  }
+  await renderViewerData($("dateFilter").value);
+}
+
+$("dateFilter").addEventListener("change", (e) => renderViewerData(e.target.value));
+
+async function renderViewerData(dateStr) {
+  const sitesWrap = $("sitesWrap");
+  sitesWrap.innerHTML = '<div class="empty">Loading...</div>';
+
+  const [plantsRes, employeesRes, attendanceRes] = await Promise.all([
+    supabaseClient.from("plants").select("*").order("name"),
+    supabaseClient.from("employees").select("*").eq("is_active", true),
+    supabaseClient.from("attendance").select("*").eq("attendance_date", dateStr)
+  ]);
+
+  const plants = plantsRes.data || [];
+  const employees = employeesRes.data || [];
+  const attendanceRows = attendanceRes.data || [];
+
+  const attByEmployee = {};
+  attendanceRows.forEach((r) => { attByEmployee[r.employee_id] = r; });
+
+  let totalPresent = 0, totalAbsent = 0;
+  sitesWrap.innerHTML = "";
+
+  plants.forEach((plant) => {
+    const plantEmployees = employees.filter((e) => e.plant_id === plant.id);
+    let present = 0, absent = 0;
+
+    const rowsHtml = plantEmployees
+      .map((emp) => {
+        const rec = attByEmployee[emp.id];
+        const isPresent = !!(rec && rec.within_range === true);
+        if (isPresent) present++; else absent++;
+
+        const timeStr = rec
+          ? new Date(rec.clock_in_time).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+          : "—";
+        const noteStr = rec && !rec.within_range ? " · range se bahar" : "";
+
+        const viewBtn = rec
+          ? `<button class="photo-btn" data-selfie="${rec.selfie_url}" data-name="${emp.name}" data-time="${timeStr}" data-dist="${rec.distance_meters ? Math.round(rec.distance_meters) : ""}">📷 View</button>`
+          : `<button class="photo-btn" disabled>—</button>`;
+
+        return `
+        <div class="employee-row">
+          <div><div class="empname">${emp.name}</div><div class="empmeta">${timeStr}${noteStr}</div></div>
+          <div class="status ${isPresent ? "green" : "red"}">● ${isPresent ? "Present" : "Absent"}</div>
+          ${viewBtn}
+        </div>`;
+      })
+      .join("");
+
+    totalPresent += present;
+    totalAbsent += absent;
+
+    const badge =
+      absent === 0 && plantEmployees.length > 0
+        ? '<span class="badge">All Present</span>'
+        : present === 0
+        ? '<span class="badge bad">All Absent</span>'
+        : '<span class="badge warn">Partial</span>';
+
+    const card = document.createElement("div");
+    card.className = "site-card";
+    card.innerHTML = `
+      <div class="sitehead">
+        <div><div class="site-title">${plant.name}</div><div class="location">${plantEmployees.length} employees</div></div>
+        ${badge}
+      </div>
+      ${rowsHtml || '<div class="empty">Koi employee assign nahi hai.</div>'}
+    `;
+    sitesWrap.appendChild(card);
+  });
+
+  $("statsRow").innerHTML = `
+    <div class="stat"><div class="label">Sites</div><div class="num blue">${plants.length}</div></div>
+    <div class="stat"><div class="label">Present</div><div class="num green">${totalPresent}</div></div>
+    <div class="stat"><div class="label">Absent</div><div class="num red">${totalAbsent}</div></div>
+  `;
+
+  document.querySelectorAll(".photo-btn[data-selfie]").forEach((btn) => {
+    btn.addEventListener("click", () =>
+      openSelfieModal(btn.dataset.selfie, btn.dataset.name, btn.dataset.time, btn.dataset.dist)
+    );
+  });
+}
+
+async function openSelfieModal(path, name, time, dist) {
+  $("modalMeta").textContent = "Loading...";
+  $("modalImg").src = "";
+  $("selfieModal").style.display = "flex";
+
+  const { data, error } = await supabaseClient.storage.from(SELFIE_BUCKET).createSignedUrl(path, 60);
+  if (error || !data) {
+    $("modalMeta").textContent = "Selfie load nahi ho payi.";
+    return;
+  }
+  $("modalImg").src = data.signedUrl;
+  $("modalMeta").textContent = `${name} · ${time}${dist ? " · " + dist + "m" : ""}`;
+}
+
+$("modalCloseBtn").addEventListener("click", () => {
+  $("selfieModal").style.display = "none";
 });
 
+// ============================================
+// INIT
+// ============================================
 initAuth();
