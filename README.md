@@ -1,6 +1,6 @@
 # Selfie Attendance
 
-Google login → live camera se selfie → GPS location → assigned plant se distance calculate → Supabase mein save.
+Google login → Employee ya Viewer choose karo → Employee: live camera selfie + GPS distance check + clock-in. Viewer: sabhi sites ka live attendance dashboard.
 
 ## Files
 
@@ -10,79 +10,65 @@ selfie-attendance/
 ├── css/styles.css
 ├── js/config.js        ← yahan apni Supabase keys daalni hain
 ├── js/app.js
-├── supabase-schema.sql ← Supabase mein ek baar run karna hai
+├── supabase-schema.sql ← Supabase mein run karna hai (naye setup ya migration dono ke liye)
 └── README.md
 ```
 
-## Setup — step by step
+## Naye setup ke liye (pehli baar)
+Purane README wale steps 1–8 same hain (Supabase project, schema run, storage bucket, Google OAuth, config.js, GitHub Pages deploy). `supabase-schema.sql` poori file top-to-bottom run karo — ismein migration section bhi already included hai, dono fresh install aur upgrade ke liye safe hai.
 
-### 1. Supabase project banao
-[supabase.com](https://supabase.com) par free account bana kar naya project banao.
+## Agar pehle se chal raha hai (upgrade)
+Sirf `supabase-schema.sql` file ka **naya content** (section 9 — "MIGRATION") SQL Editor mein paste karke run kar do. Yeh safe hai, dobara run karne se kuch टूटेगा nahi.
 
-### 2. Database schema run karo
-Supabase Dashboard → **SQL Editor** → `supabase-schema.sql` ka pura content copy-paste karke **Run** dabao.
-Isse `plants`, `employees`, `attendance` tables ban jayenge, 5 plants insert ho jayenge, aur employees bhi (dummy emails ke saath, sirf Rahul ka email real hai — testing ke liye).
-
-### 3. Storage bucket banao
-Dashboard → **Storage** → **New bucket** → naam exactly `attendance-selfies`, **Private** rakhna (public mat karna). Schema file ke andar jo storage policies hain wo already SQL Editor se run ho chuki hongi (step 2 mein).
-
-### 4. Google OAuth setup
-1. [Google Cloud Console](https://console.cloud.google.com) → naya project → **APIs & Services → Credentials**
-2. **Create Credentials → OAuth Client ID** → type: **Web application**
-3. **Authorized redirect URI** mein daalo:
-   ```
-   https://<your-project-ref>.supabase.co/auth/v1/callback
-   ```
-   (`<your-project-ref>` Supabase project settings mein milega)
-4. Client ID + Client Secret copy karo
-5. Supabase Dashboard → **Authentication → Providers → Google** → dono paste karo → Save
-
-### 5. Redirect URL Supabase mein whitelist karo
-Supabase Dashboard → **Authentication → URL Configuration**:
-- **Site URL**: `https://<your-github-username>.github.io/<repo-name>/`
-- **Redirect URLs** mein bhi wahi URL add karo
-
-(GitHub Pages live karne ke baad hi exact URL milega — step 7 ke baad yahan aa kar update kar dena.)
-
-### 6. `js/config.js` fill karo
-Supabase Dashboard → **Settings → API** se copy karo:
-```js
-const SUPABASE_CONFIG = {
-  url: "https://xxxxxxxx.supabase.co",
-  anonKey: "eyJhbGciOiJIUzI1NiIs...."
-};
-```
-
-### 7. GitHub Pages par deploy karo
-1. Naya GitHub repo banao, is poore folder ka content push karo
-2. Repo → **Settings → Pages** → Source: `main` branch, root folder → Save
-3. Kuch minute mein `https://<username>.github.io/<repo-name>/` par live ho jayega
-4. Ab step 5 mein wapas jao aur Supabase mein yehi exact URL confirm kar do
-
-### 8. Test karo
-Rahul ke real Gmail (`chauhanrahul2850@gmail.com`) se login karo — usse "Office" plant assign hai. Camera permission allow karo, location permission allow karo, selfie lo, submit karo. Supabase Dashboard → **Table Editor → attendance** mein record dikhna chahiye.
-
-## Baaki employees add karna
-
-Abhi 9 employees ke email **dummy** hain (jaise `sagar.chauhan.dummy1@gmail.com`) — inse login nahi ho payega kyunki yeh real Gmail accounts nahi hain. Jab real Gmail mil jaye, Supabase **SQL Editor** mein:
-
+Migration ke baad ek line zaroor check karo:
 ```sql
-update employees set email = 'real.email@gmail.com' where name = 'Sagar Chauhan';
+update employees set is_admin = true where email = 'chauhanrahul2850@gmail.com';
+```
+Isse Rahul ko **Viewer dashboard access** mil jata hai. Kisi aur ko bhi viewer banana ho to unka email isi tarah `is_admin = true` kar dena.
+
+## Is update mein kya naya hai
+
+### 1. Ek din mein sirf ek clock-in
+Ab agar employee ne aaj already attendance mark kar li hai, to camera/clock-in options hide ho jate hain aur "Aaj already clock-in ho chuki hai — [time]" dikhta hai. Yeh do level par enforce hota hai:
+- App khud check karke button hide kar deta hai
+- **Database level par bhi lock hai** (unique constraint) — koi bhi tarike se bhi dusri baar insert nahi ho sakta, chahe koi console se try kare
+
+### 2. Device-flag fix (site data clear hone par)
+Pehle: agar employee apne phone ka browser history/site-data clear karta tha, to naya "device" detect ho jata tha aur galat flag lagta tha.
+Ab: ek **device fingerprint** (phone/browser ki hi characteristics se bana, jo site-data clear hone par bhi nahi badalta) backup ke roop mein check hota hai. Agar fingerprint match kare to same device maana jata hai, dobara silently bind ho jata hai — flag nahi lagta. Sirf **genuinely naya device/phone** hi flag hoga.
+
+*Note: yeh 100% foolproof nahi hai (koi bahut technical user isse bhi bypass kar sakta hai), lekin normal "history clear kiya" wali situation ab sahi se handle hoti hai.*
+
+### 3. Landing screen — Employee ya Viewer
+Website khulte hi ab do button dikhte hain: **Employee** (clock-in ke liye) aur **Viewer** (dashboard dekhne ke liye). Dono Google se sign-in maangte hain. Viewer sirf unhi employees ko milta hai jinka `is_admin = true` hai database mein.
+
+### 4. Viewer Dashboard
+- Date picker — aaj ke alawa purane din bhi dekh sakte ho
+- Har site (plant) ka apna card, real naam ke saath — koi bhi site/employee hardcoded nahi hai, sab database se live aata hai
+- **Present** = us din within-range clock-in hua ho
+- **Absent** = clock-in hi nahi hua, YA clock-in hua par range se bahar tha (row par "range se bahar" note dikhta hai clarity ke liye)
+- **View button** — us employee ki selfie kholta hai (secure signed link, 60 second ke liye valid)
+- Sites/Present/Absent ka summary top par
+
+## Site ya employee add karna — ab sirf database se, koi code change nahi
+
+**Naya site add karna:**
+```sql
+insert into plants (name, latitude, longitude, radius_meters)
+values ('Naya Site Ka Naam', 21.xxxxx, 70.xxxxx, 150);
 ```
 
-## Isme kya included hai
+**Naya employee add karna:**
+```sql
+insert into employees (plant_id, name, email)
+select id, 'Employee Ka Naam', 'unka.email@gmail.com'
+from plants where name = 'Site Ka Naam';
+```
+(Ismein bhi Google OAuth test-users list mein unka email add karna mat bhoolna, jab tak app "Testing" mode mein hai.)
 
-- **Google Sign-In** (Supabase Auth) — sirf registered employees hi login kar sakte hain
-- **Live camera selfie** — koi gallery/file-upload option nahi hai, seedha camera se capture
-- **GPS distance check** — employee ke assigned plant se live distance nikal kar radius ke andar/bahar dikhata hai
-- **Device binding** — pehli login jis phone/browser se hogi, wahi us employee ka locked device ban jata hai. Doosre device se login hone par attendance **block nahi hoti** par `flagged` status ke saath save hoti hai (History table mein "Flagged" dikhega)
-- **Low-accuracy GPS flag** — agar location signal weak/suspicious ho (accuracy > 50m) to bhi flag ho jata hai
-- **Selfie compression** — photo 480px width + 60% quality par save hoti hai (~30-60 KB), Supabase free 1GB storage saalon chalega
-- **Attendance history** — har employee apni last 10 entries dekh sakta hai
+Bas — koi HTML/JS file edit ya redeploy karne ki zaroorat nahi. App hamesha `plants` aur `employees` table se live data uthata hai.
 
-## Known limitations (agle phase mein karna hai)
-
-1. **Distance/flag calculation abhi client-side (browser JS) mein hoti hai.** Koi technically-savvy user browser console se values manipulate kar sakta hai. Production ke liye yeh logic ek **Supabase Edge Function** mein move karna chahiye jo server-side verify kare — abhi ke liye testing/MVP ke liye theek hai.
-2. **IP-address se location cross-check abhi implement nahi hai** — isme ek external geo-IP API aur Edge Function chahiye hoga.
-3. **Mock-GPS app detection** (Android "Allow mock locations" setting) browser se directly detect nahi ho sakta — isके liye website ko native app wrapper (Capacitor) mein convert karna padega.
-4. **Admin panel abhi nahi hai** — records dekhne ke liye abhi Supabase Table Editor use karna hoga. Chaho to alag se admin dashboard bhi bana sakte hain.
+## Purani limitations (still true)
+1. Distance/flag calculation abhi client-side hai — production-grade tamper-proofing ke liye Supabase Edge Function chahiye hoga (agla phase)
+2. IP-based location cross-check implement nahi hai
+3. Android "mock GPS" developer-setting detection ke liye native app wrapper chahiye hoga, plain website se possible nahi

@@ -158,3 +158,43 @@ insert into employees (plant_id, name, email)
 -- 3. Copy Client ID + Client Secret
 -- 4. Supabase Dashboard → Authentication → Providers → Google → paste both → Save
 -- ============================================
+
+-- ============================================
+-- 9. MIGRATION — naye features ke liye (safe to run even if already run once)
+-- ============================================
+
+-- One clock-in per employee per day (India date, not device date)
+alter table attendance add column if not exists attendance_date date
+  default (timezone('Asia/Kolkata', now()))::date;
+update attendance set attendance_date = (timezone('Asia/Kolkata', clock_in_time))::date
+  where attendance_date is null;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'unique_employee_per_day'
+  ) then
+    alter table attendance add constraint unique_employee_per_day unique (employee_id, attendance_date);
+  end if;
+end $$;
+
+-- Device fingerprint (fallback so clearing browser data on the SAME phone
+-- doesn't wrongly flag it as a new device)
+alter table employees add column if not exists device_fingerprint text;
+
+-- Viewer/admin access flag
+alter table employees add column if not exists is_admin boolean default false;
+
+-- Let admins read every employee row (needed for the Viewer dashboard).
+-- Non-admins still only see their own row via the existing policy.
+drop policy if exists "Allow admin read all employees" on employees;
+create policy "Allow admin read all employees" on employees
+  for select using (
+    exists (
+      select 1 from employees e2
+      where e2.email = auth.jwt() ->> 'email' and e2.is_admin = true
+    )
+  );
+
+-- Mark Rahul as the Viewer/admin (update the email if it's different)
+update employees set is_admin = true where email = 'chauhanrahul2850@gmail.com';
