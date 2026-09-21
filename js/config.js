@@ -2,7 +2,7 @@
 // FILL THESE IN — Supabase Dashboard → Settings → API
 // ============================================
 const SUPABASE_CONFIG = {
-  url: "YOUR_SUPABASE_PROJECT_URL",       // e.g. https://xxxxxxxx.supabase.co
+  url: "https://vuptpngnvhgisnkzeyog.supabase.co",       // e.g. https://xxxxxxxx.supabase.co
   anonKey: "YOUR_SUPABASE_ANON_KEY"       // the long "anon public" key
 };
 
