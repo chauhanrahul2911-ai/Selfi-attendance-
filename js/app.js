@@ -169,9 +169,6 @@ async function loadEmployeeRecord() {
     .eq("is_active", true)
     .maybeSingle();
 
-  window.__debugEmail = email;
-  window.__debugError = error;
-
   if (emp) {
     currentEmployee = emp;
     currentPlant = emp.plants;
@@ -195,11 +192,6 @@ async function routeToMode(mode) {
     $("empName").textContent = currentUser.email;
     $("empPlant").textContent = "Not registered";
     $("clockInFlow").style.display = "none";
-    const dbg = window.__debugError
-      ? "Error: " + window.__debugError.message + " (code: " + (window.__debugError.code || "?") + ")"
-      : "Searched email: " + window.__debugEmail + " — koi matching row nahi mila (ya RLS ne block kiya).";
-    $("debugInfo").textContent = dbg;
-    $("debugInfo").style.display = "block";
     return;
   }
 
@@ -529,14 +521,22 @@ async function loadHistory() {
 // ============================================
 async function loadViewer() {
   $("viewerSection").style.display = "block";
+  $("viewerDenied").style.display = "none";
+  $("viewerContent").style.display = "none";
 
-  if (!currentEmployee || !currentEmployee.is_admin) {
+  const email = (currentUser.email || "").trim().toLowerCase();
+  const { data: blocked } = await supabaseClient
+    .from("blocked_viewers")
+    .select("email")
+    .ilike("email", email)
+    .maybeSingle();
+
+  if (blocked) {
+    $("viewerDenied").textContent = "Aapko viewer access se block kar diya gaya hai.";
     $("viewerDenied").style.display = "block";
-    $("viewerContent").style.display = "none";
     return;
   }
 
-  $("viewerDenied").style.display = "none";
   $("viewerContent").style.display = "block";
 
   if (!$("dateFilter").value) {
