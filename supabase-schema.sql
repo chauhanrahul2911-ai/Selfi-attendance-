@@ -1,200 +1,165 @@
 -- ============================================
--- ATTENDANCE SYSTEM — SUPABASE SCHEMA
--- Run this in Supabase Dashboard → SQL Editor
+-- SELFIE ATTENDANCE — FULL SCHEMA (consolidated / current state)
+-- ============================================
+-- Yeh file ek NAYE Supabase project ke liye hai — agar tum scratch se
+-- (naya device, naya Supabase account) setup kar rahe ho, to isse poori
+-- file top-to-bottom ek baar SQL Editor mein run kar do. Isme structure,
+-- security (RLS), aur tumhare 5 known sites already seed ho jayenge.
+--
+-- Apne EXISTING/live Supabase project par isse dobara MAT chalana —
+-- tables already bani hui hain, dobara chalane se error aayega.
 -- ============================================
 
--- 1. PLANTS TABLE
-create table plants (
+-- ============================================
+-- 1. TABLES
+-- ============================================
+
+create table if not exists plants (
   id uuid primary key default gen_random_uuid(),
-  name text not null,
+  name text not null unique,
   latitude double precision,
   longitude double precision,
   radius_meters integer not null default 150,
   created_at timestamptz default now()
 );
 
--- Insert your 5 plants (latitude/longitude ko baad me update karna, filhaal null hain)
-insert into plants (name) values
-  ('24GreenPark'),
-  ('Office'),
-  ('Maruti Solar'),
-  ('AGEPL Nandana'),
-  ('AGEPL Dhrafa');
-
--- 2. EMPLOYEES TABLE
-create table employees (
+create table if not exists employees (
   id uuid primary key default gen_random_uuid(),
   plant_id uuid references plants(id) not null,
   name text not null,
-  email text unique not null,               -- must match their Gmail/Google login email
-  device_id text,                           -- set automatically on first login
-  device_locked boolean default false,      -- true once bound to a device
+  email text unique not null,          -- must match their Gmail/Google login email
+  device_id text,                       -- set automatically on first login
+  device_fingerprint text,              -- backup device check (survives clearing site data)
+  device_locked boolean default false,
+  is_admin boolean default false,       -- true = can also open the Viewer dashboard
   is_active boolean default true,
   created_at timestamptz default now()
 );
 
--- 3. ATTENDANCE TABLE
-create table attendance (
+create table if not exists attendance (
   id uuid primary key default gen_random_uuid(),
   employee_id uuid references employees(id) not null,
   plant_id uuid references plants(id) not null,
   clock_in_time timestamptz default now(),
+  attendance_date date default (timezone('Asia/Kolkata', now()))::date,
   latitude double precision not null,
   longitude double precision not null,
-  gps_accuracy double precision,            -- meters, for anomaly detection
+  gps_accuracy double precision,
   distance_meters double precision not null,
   within_range boolean not null,
-  selfie_url text,                          -- link to Supabase Storage
-  ip_address text,
-  ip_location text,                         -- city/region from IP lookup
-  ip_mismatch_flag boolean default false,   -- true if IP location far from GPS location
+  selfie_url text,                      -- storage path, not a public link (bucket is private)
   device_id text,
   device_mismatch_flag boolean default false,
-  status text default 'pending_review',     -- 'ok', 'flagged', 'pending_review'
-  created_at timestamptz default now()
+  status text default 'pending_review', -- 'ok' | 'flagged'
+  created_at timestamptz default now(),
+  constraint unique_employee_per_day unique (employee_id, attendance_date)
 );
 
--- 4. STORAGE BUCKET FOR SELFIES
--- Supabase Dashboard → Storage → New Bucket → name: "attendance-selfies" (private, not public)
--- Yeh SQL editor se nahi hota, dashboard se manually bucket banana hoga.
--- Bucket banane ke baad, yeh policies chalao (storage.objects par):
-create policy "Authenticated users can upload selfies" on storage.objects
-  for insert to authenticated
-  with check (bucket_id = 'attendance-selfies');
-create policy "Authenticated users can read selfies" on storage.objects
-  for select to authenticated
-  using (bucket_id = 'attendance-selfies');
+create table if not exists blocked_viewers (
+  email text primary key,
+  blocked_at timestamptz default now(),
+  note text
+);
 
--- 5. ROW LEVEL SECURITY (recommended)
+-- ============================================
+-- 2. STORAGE BUCKET (manual step — dashboard se karna hai)
+-- ============================================
+-- Supabase Dashboard → Storage → New bucket
+--   Name: attendance-selfies
+--   Public: OFF (private)
+-- Yeh SQL se nahi banta, upar wale steps dashboard mein follow karo.
+
+-- ============================================
+-- 3. ROW LEVEL SECURITY
+-- ============================================
 alter table plants enable row level security;
 alter table employees enable row level security;
 alter table attendance enable row level security;
+alter table blocked_viewers enable row level security;
 
--- Anon key ko sirf zaroori operations allow karo (yeh baad me tighten karenge
--- jab Edge Function ready ho jaye — abhi ke liye basic policies):
-create policy "Allow read plants" on plants for select using (true);
-create policy "Allow employee read own record via authenticated email" on employees
-  for select using (auth.jwt() ->> 'email' = email);
-create policy "Allow employee update own device info" on employees
-  for update using (auth.jwt() ->> 'email' = email)
-  with check (auth.jwt() ->> 'email' = email);
-create policy "Allow insert attendance if authenticated" on attendance
-  for insert with check (auth.role() = 'authenticated');
-create policy "Allow read own attendance" on attendance
+-- PLANTS — sab dekh sakte hain, site info sensitive nahi hai
+drop policy if exists "plants_select" on plants;
+create policy "plants_select" on plants for select using (true);
+
+-- EMPLOYEES
+-- apna record hamesha dikhe (Employee tab ke liye, login ke turant baad chahiye)
+drop policy if exists "employees_select_own" on employees;
+create policy "employees_select_own" on employees
+  for select using (lower(auth.jwt() ->> 'email') = lower(email));
+
+-- poori list sirf kisi bhi logged-in Google user ko (Viewer dashboard ke liye)
+drop policy if exists "employees_select_all_authenticated" on employees;
+create policy "employees_select_all_authenticated" on employees
+  for select to authenticated using (true);
+
+-- apna device_id/fingerprint khud update kar sake (device binding ke liye)
+drop policy if exists "employees_update_own_device" on employees;
+create policy "employees_update_own_device" on employees
+  for update using (lower(auth.jwt() ->> 'email') = lower(email))
+  with check (lower(auth.jwt() ->> 'email') = lower(email));
+
+-- ATTENDANCE
+-- apni history hamesha dikhe (Employee tab ke "Recent Attendance" ke liye)
+drop policy if exists "attendance_select_own" on attendance;
+create policy "attendance_select_own" on attendance
   for select using (
-    employee_id in (select id from employees where email = auth.jwt() ->> 'email')
+    employee_id in (select id from employees where lower(email) = lower(auth.jwt() ->> 'email'))
   );
 
--- 6. UPDATE PLANT COORDINATES (fresh values from Google Maps)
-update plants set latitude = 21.942867, longitude = 70.050572, radius_meters = 150
-  where name = '24GreenPark';
-update plants set latitude = 22.010581, longitude = 70.037650, radius_meters = 150
-  where name = 'Maruti Solar';
-update plants set latitude = 21.981487, longitude = 70.055912, radius_meters = 150
-  where name = 'AGEPL Nandana';
-update plants set latitude = 21.981819, longitude = 70.093543, radius_meters = 150
-  where name = 'AGEPL Dhrafa';
-update plants set latitude = 21.907182, longitude = 70.036780, radius_meters = 150
-  where name = 'Office';
+-- poori list sirf kisi bhi logged-in Google user ko (Viewer dashboard ke liye)
+drop policy if exists "attendance_select_all_authenticated" on attendance;
+create policy "attendance_select_all_authenticated" on attendance
+  for select to authenticated using (true);
 
--- If you already ran an earlier version of this file where the 5th plant was
--- named 'Madhav Solar' instead of 'Office', run this once to fix it instead
--- of re-running the insert above (which would create a duplicate row):
--- update plants set name = 'Office' where name = 'Madhav Solar';
+-- clock-in insert sirf logged-in user hi kar sake
+drop policy if exists "attendance_insert_authenticated" on attendance;
+create policy "attendance_insert_authenticated" on attendance
+  for insert to authenticated with check (true);
 
--- 7. INSERT EMPLOYEES
--- Emails marked "dummy" below are placeholders (not real inboxes) so Rahul
--- can test the flow end-to-end first. Replace each with the employee's real
--- Gmail later using: update employees set email = 'real@gmail.com' where name = '...';
-insert into employees (plant_id, name, email)
-  select id, e.name, e.email from plants,
-  (values
-    ('Sagar Chauhan', 'sagar.chauhan.dummy1@gmail.com'),
-    ('Arun Dabhi', 'arun.dabhi.dummy2@gmail.com')
-  ) as e(name, email)
-  where plants.name = '24GreenPark';
-
-insert into employees (plant_id, name, email)
-  select id, e.name, e.email from plants,
-  (values
-    ('Vadecha Jayesh', 'jayesh.vadecha.dummy3@gmail.com'),
-    ('Rohan', 'rohan.maruti.dummy4@gmail.com'),
-    ('Nilesh Chauhan', 'nilesh.chauhan.dummy5@gmail.com')
-  ) as e(name, email)
-  where plants.name = 'Maruti Solar';
-
-insert into employees (plant_id, name, email)
-  select id, e.name, e.email from plants,
-  (values
-    ('Dabhecha Chirag', 'chirag.dabhecha.dummy6@gmail.com'),
-    ('Sunil Zinzuvadiya', 'sunil.zinzuvadiya.dummy7@gmail.com')
-  ) as e(name, email)
-  where plants.name = 'AGEPL Nandana';
-
-insert into employees (plant_id, name, email)
-  select id, e.name, e.email from plants,
-  (values
-    ('Piyush Bera', 'piyush.bera.dummy8@gmail.com'),
-    ('Ketan Sathalpara', 'ketan.sathalpara.dummy9@gmail.com')
-  ) as e(name, email)
-  where plants.name = 'AGEPL Dhrafa';
-
--- Rahul's real Gmail (Office plant) — this one is real, use it for testing
-insert into employees (plant_id, name, email)
-  select id, 'Rahul Chauhan', 'chauhanrahul2850@gmail.com'
-  from plants where plants.name = 'Office';
+-- BLOCKED VIEWERS — koi bhi sirf apna khud ka block-status check kar sake
+drop policy if exists "blocked_viewers_select_own" on blocked_viewers;
+create policy "blocked_viewers_select_own" on blocked_viewers
+  for select using (lower(auth.jwt() ->> 'email') = lower(email));
 
 -- ============================================
--- NOTE: Employee emails abhi khaali hain (email required hai, must match
--- their Gmail login exactly). Employee names aur unke Gmail address batao,
--- main INSERT/UPDATE statements bana dunga.
--- Plant latitude/longitude bhi batao (ya website se "use current location"
--- button se set kar sakte ho, phir yahan se copy kar lena).
+-- 4. STORAGE POLICIES (bucket bana lene ke BAAD chalao)
+-- ============================================
+drop policy if exists "selfies_insert_authenticated" on storage.objects;
+create policy "selfies_insert_authenticated" on storage.objects
+  for insert to authenticated with check (bucket_id = 'attendance-selfies');
+
+drop policy if exists "selfies_select_authenticated" on storage.objects;
+create policy "selfies_select_authenticated" on storage.objects
+  for select to authenticated using (bucket_id = 'attendance-selfies');
+
+-- ============================================
+-- 5. SEED DATA — apne 5 known sites (naye project mein already daal do)
+-- ============================================
+insert into plants (name, latitude, longitude, radius_meters) values
+  ('24GreenPark',    21.942867, 70.050572, 150),
+  ('Maruti Solar',   22.010581, 70.037650, 150),
+  ('AGEPL Nandana',  21.981487, 70.055912, 150),
+  ('AGEPL Dhrafa',   21.981819, 70.093543, 150),
+  ('Office',         21.907182, 70.036780, 150)
+on conflict (name) do nothing;
+
+-- ============================================
+-- 6. EMPLOYEES SEED — yeh tumhe khud generate karna hai (backup lete waqt)
+-- ============================================
+-- Employees baar-baar naam/email/plant badalte rehte hain, isliye yahan
+-- ek fixed list rakhna galat ho sakta hai (outdated ho sakti hai).
 --
--- GOOGLE OAUTH SETUP (do this in Supabase dashboard, one-time):
--- 1. Google Cloud Console → create project → OAuth consent screen → 
---    create OAuth Client ID (type: Web application)
--- 2. Authorized redirect URI: https://<your-project-ref>.supabase.co/auth/v1/callback
--- 3. Copy Client ID + Client Secret
--- 4. Supabase Dashboard → Authentication → Providers → Google → paste both → Save
--- ============================================
-
--- ============================================
--- 9. MIGRATION — naye features ke liye (safe to run even if already run once)
--- ============================================
-
--- One clock-in per employee per day (India date, not device date)
-alter table attendance add column if not exists attendance_date date
-  default (timezone('Asia/Kolkata', now()))::date;
-update attendance set attendance_date = (timezone('Asia/Kolkata', clock_in_time))::date
-  where attendance_date is null;
-
-do $$
-begin
-  if not exists (
-    select 1 from pg_constraint where conname = 'unique_employee_per_day'
-  ) then
-    alter table attendance add constraint unique_employee_per_day unique (employee_id, attendance_date);
-  end if;
-end $$;
-
--- Device fingerprint (fallback so clearing browser data on the SAME phone
--- doesn't wrongly flag it as a new device)
-alter table employees add column if not exists device_fingerprint text;
-
--- Viewer/admin access flag
-alter table employees add column if not exists is_admin boolean default false;
-
--- Let admins read every employee row (needed for the Viewer dashboard).
--- Non-admins still only see their own row via the existing policy.
-drop policy if exists "Allow admin read all employees" on employees;
-create policy "Allow admin read all employees" on employees
-  for select using (
-    exists (
-      select 1 from employees e2
-      where e2.email = auth.jwt() ->> 'email' and e2.is_admin = true
-    )
-  );
-
--- Mark Rahul as the Viewer/admin (update the email if it's different)
-update employees set is_admin = true where email = 'chauhanrahul2850@gmail.com';
+-- Jab bhi tumhe apni CURRENT live employee list ka backup chahiye ho
+-- (is file mein daalne ke liye), apne LIVE Supabase project mein yeh
+-- query chalao — iska output ready-made INSERT statements dega jo
+-- seedha copy-paste karke yahan neeche daal sakte ho:
+--
+--   select 'insert into employees (plant_id, name, email, is_admin, is_active) '
+--     || 'select id, ''' || e.name || ''', ''' || e.email || ''', '
+--     || e.is_admin || ', ' || e.is_active
+--     || ' from plants where name = ''' || p.name || ''';' as insert_statement
+--   from employees e join plants p on p.id = e.plant_id
+--   order by p.name, e.name;
+--
+-- Result ka har row ek ready SQL statement hai — sabko copy karke
+-- yahan neeche paste kar dena.
