@@ -553,7 +553,7 @@ async function renderViewerData(dateStr) {
 
   const [plantsRes, employeesRes, attendanceRes] = await Promise.all([
     supabaseClient.from("plants").select("*").order("name"),
-    supabaseClient.from("employees").select("*").eq("is_active", true),
+    supabaseClient.from("employees").select("*").eq("is_active", true).order("sort_order").order("name"),
     supabaseClient.from("attendance").select("*").eq("attendance_date", dateStr)
   ]);
 
