@@ -171,3 +171,8 @@ select schemaname, tablename, policyname from pg_policies
 where tablename in ('plants','employees','attendance','blocked_viewers')
 or (schemaname = 'storage' and tablename = 'objects');
 ```
+
+**Future mein kisi bhi site ka order badalna ho to bas number update karna:**
+```sql
+update employees set sort_order = 1 where name = 'Employee Ka Naam';
+```
