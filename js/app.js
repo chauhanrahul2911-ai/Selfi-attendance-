@@ -641,7 +641,7 @@ async function renderViewerData(dateStr) {
 
   document.querySelectorAll(".icon-btn[data-lat]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      window.open(`https://www.google.com/maps?q=${btn.dataset.lat},${btn.dataset.lng}`, "_blank");
+      window.open(`https://www.google.com/maps?q=${btn.dataset.lat},${btn.dataset.lng}&t=k`, "_blank");
     });
   });
 }
@@ -650,7 +650,7 @@ async function openSelfieModal(path, name, time, dist, lat, lng) {
   $("modalMeta").textContent = "Loading...";
   $("modalImg").src = "";
   if (lat && lng) {
-    $("modalMapLink").href = `https://www.google.com/maps?q=${lat},${lng}`;
+    $("modalMapLink").href = `https://www.google.com/maps?q=${lat},${lng}&t=k`;
     $("modalMapLink").style.display = "block";
   } else {
     $("modalMapLink").style.display = "none";
