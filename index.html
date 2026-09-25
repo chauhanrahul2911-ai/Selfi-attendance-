@@ -113,7 +113,15 @@
     <button class="modal-close" id="modalCloseBtn">✕</button>
     <img id="modalImg" alt="Selfie">
     <div id="modalMeta" class="modal-meta"></div>
-    <a id="modalMapLink" class="modal-map-link" target="_blank" rel="noopener" style="display:none;">🗺️ Location Google Maps par dekhein</a>
+    <iframe id="modalMapFrame" class="map-frame" style="display:none;" loading="lazy"></iframe>
+  </div>
+</div>
+
+<!-- STANDALONE MAP MODAL -->
+<div id="mapModal" class="modal" style="display:none;">
+  <div class="modal-inner">
+    <button class="modal-close" id="mapModalCloseBtn">✕</button>
+    <iframe id="mapFrame" class="map-frame map-frame-tall" loading="lazy"></iframe>
   </div>
 </div>
 
