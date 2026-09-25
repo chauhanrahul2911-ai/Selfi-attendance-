@@ -324,3 +324,46 @@ th{ color:var(--muted); font-weight:600; font-size:11px; }
   text-align:center;
   margin-top:10px;
 }
+
+/* ===== STATUS BADGE (compact P/A) ===== */
+.employee-row{
+  grid-template-columns:1fr auto auto;
+}
+.status-badge{
+  width:24px;
+  height:24px;
+  border-radius:50%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:12px;
+  font-weight:800;
+}
+.status-badge.green{ background:#E7F3E8; color:var(--good); }
+.status-badge.red{ background:#FBEAE9; color:var(--bad); }
+
+.row-actions{
+  display:flex;
+  gap:6px;
+}
+.icon-btn{
+  width:auto;
+  margin:0;
+  background:#EEF3FF;
+  color:#315FD2;
+  border:none;
+  padding:7px 9px;
+  border-radius:7px;
+  font-size:13px;
+}
+.icon-btn:disabled{ background:var(--paper); color:var(--line); }
+
+.modal-map-link{
+  display:block;
+  text-align:center;
+  margin-top:10px;
+  color:#315FD2;
+  font-size:13px;
+  font-weight:600;
+  text-decoration:none;
+}
