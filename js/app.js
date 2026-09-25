@@ -582,9 +582,6 @@ async function renderViewerData(dateStr) {
           : "—";
         const noteStr = rec && !rec.within_range ? " · range se bahar" : "";
 
-        const mapBtn = rec
-          ? `<button class="icon-btn" data-lat="${rec.latitude}" data-lng="${rec.longitude}" title="Location dekhein">🗺️</button>`
-          : `<button class="icon-btn" disabled>—</button>`;
         const viewBtn = rec
           ? `<button class="photo-btn" data-selfie="${rec.selfie_url}" data-name="${emp.name}" data-time="${timeStr}" data-dist="${rec.distance_meters ? Math.round(rec.distance_meters) : ""}" data-lat="${rec.latitude}" data-lng="${rec.longitude}">📷 View</button>`
           : `<button class="photo-btn" disabled>—</button>`;
@@ -592,8 +589,8 @@ async function renderViewerData(dateStr) {
         return `
         <div class="employee-row">
           <div><div class="empname">${emp.name}</div><div class="empmeta">${timeStr}${noteStr}</div></div>
-          <div class="status-badge ${isPresent ? "green" : "red"}" title="${isPresent ? "Present" : "Absent"}">${isPresent ? "P" : "A"}</div>
-          <div class="row-actions">${mapBtn}${viewBtn}</div>
+          <div class="status ${isPresent ? "green" : "red"}">● ${isPresent ? "Present" : "Absent"}</div>
+          ${viewBtn}
         </div>`;
       })
       .join("");
@@ -639,20 +636,7 @@ async function renderViewerData(dateStr) {
     );
   });
 
-  document.querySelectorAll(".icon-btn[data-lat]").forEach((btn) => {
-    btn.addEventListener("click", () => openMapModal(btn.dataset.lat, btn.dataset.lng));
-  });
 }
-
-function openMapModal(lat, lng) {
-  $("mapFrame").src = `https://maps.google.com/maps?q=${lat},${lng}&z=17&t=k&output=embed`;
-  $("mapModal").style.display = "flex";
-}
-
-$("mapModalCloseBtn").addEventListener("click", () => {
-  $("mapModal").style.display = "none";
-  $("mapFrame").src = "";
-});
 
 async function openSelfieModal(path, name, time, dist, lat, lng) {
   $("modalMeta").textContent = "Loading...";
