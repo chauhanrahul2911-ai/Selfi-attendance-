@@ -582,15 +582,18 @@ async function renderViewerData(dateStr) {
           : "—";
         const noteStr = rec && !rec.within_range ? " · range se bahar" : "";
 
+        const mapBtn = rec
+          ? `<button class="icon-btn" data-lat="${rec.latitude}" data-lng="${rec.longitude}" title="Location dekhein">🗺️</button>`
+          : `<button class="icon-btn" disabled>—</button>`;
         const viewBtn = rec
-          ? `<button class="photo-btn" data-selfie="${rec.selfie_url}" data-name="${emp.name}" data-time="${timeStr}" data-dist="${rec.distance_meters ? Math.round(rec.distance_meters) : ""}">📷 View</button>`
+          ? `<button class="photo-btn" data-selfie="${rec.selfie_url}" data-name="${emp.name}" data-time="${timeStr}" data-dist="${rec.distance_meters ? Math.round(rec.distance_meters) : ""}" data-lat="${rec.latitude}" data-lng="${rec.longitude}">📷 View</button>`
           : `<button class="photo-btn" disabled>—</button>`;
 
         return `
         <div class="employee-row">
           <div><div class="empname">${emp.name}</div><div class="empmeta">${timeStr}${noteStr}</div></div>
-          <div class="status ${isPresent ? "green" : "red"}">● ${isPresent ? "Present" : "Absent"}</div>
-          ${viewBtn}
+          <div class="status-badge ${isPresent ? "green" : "red"}" title="${isPresent ? "Present" : "Absent"}">${isPresent ? "P" : "A"}</div>
+          <div class="row-actions">${mapBtn}${viewBtn}</div>
         </div>`;
       })
       .join("");
@@ -625,14 +628,33 @@ async function renderViewerData(dateStr) {
 
   document.querySelectorAll(".photo-btn[data-selfie]").forEach((btn) => {
     btn.addEventListener("click", () =>
-      openSelfieModal(btn.dataset.selfie, btn.dataset.name, btn.dataset.time, btn.dataset.dist)
+      openSelfieModal(
+        btn.dataset.selfie,
+        btn.dataset.name,
+        btn.dataset.time,
+        btn.dataset.dist,
+        btn.dataset.lat,
+        btn.dataset.lng
+      )
     );
+  });
+
+  document.querySelectorAll(".icon-btn[data-lat]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      window.open(`https://www.google.com/maps?q=${btn.dataset.lat},${btn.dataset.lng}`, "_blank");
+    });
   });
 }
 
-async function openSelfieModal(path, name, time, dist) {
+async function openSelfieModal(path, name, time, dist, lat, lng) {
   $("modalMeta").textContent = "Loading...";
   $("modalImg").src = "";
+  if (lat && lng) {
+    $("modalMapLink").href = `https://www.google.com/maps?q=${lat},${lng}`;
+    $("modalMapLink").style.display = "block";
+  } else {
+    $("modalMapLink").style.display = "none";
+  }
   $("selfieModal").style.display = "flex";
 
   const { data, error } = await supabaseClient.storage.from(SELFIE_BUCKET).createSignedUrl(path, 60);
