@@ -640,20 +640,29 @@ async function renderViewerData(dateStr) {
   });
 
   document.querySelectorAll(".icon-btn[data-lat]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      window.open(`https://maps.google.com/maps?q=${btn.dataset.lat},${btn.dataset.lng}&z=17&t=k&output=embed`, "_blank");
-    });
+    btn.addEventListener("click", () => openMapModal(btn.dataset.lat, btn.dataset.lng));
   });
 }
+
+function openMapModal(lat, lng) {
+  $("mapFrame").src = `https://maps.google.com/maps?q=${lat},${lng}&z=17&t=k&output=embed`;
+  $("mapModal").style.display = "flex";
+}
+
+$("mapModalCloseBtn").addEventListener("click", () => {
+  $("mapModal").style.display = "none";
+  $("mapFrame").src = "";
+});
 
 async function openSelfieModal(path, name, time, dist, lat, lng) {
   $("modalMeta").textContent = "Loading...";
   $("modalImg").src = "";
   if (lat && lng) {
-    $("modalMapLink").href = `https://maps.google.com/maps?q=${lat},${lng}&z=17&t=k&output=embed`;
-    $("modalMapLink").style.display = "block";
+    $("modalMapFrame").src = `https://maps.google.com/maps?q=${lat},${lng}&z=17&t=k&output=embed`;
+    $("modalMapFrame").style.display = "block";
   } else {
-    $("modalMapLink").style.display = "none";
+    $("modalMapFrame").src = "";
+    $("modalMapFrame").style.display = "none";
   }
   $("selfieModal").style.display = "flex";
 
@@ -668,6 +677,7 @@ async function openSelfieModal(path, name, time, dist, lat, lng) {
 
 $("modalCloseBtn").addEventListener("click", () => {
   $("selfieModal").style.display = "none";
+  $("modalMapFrame").src = "";
 });
 
 // ============================================
