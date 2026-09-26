@@ -91,25 +91,51 @@ function drawRadar(distance, radius, inRange) {
   </svg>`;
 }
 
-function getPosition() {
-  if (!navigator.geolocation) {
-    return Promise.reject(new Error("Is browser mein location support nahi hai."));
-  }
+// Waits for a GOOD GPS fix instead of accepting the first (often coarse,
+// network-based) reading. Keeps listening for up to `timeoutMs`, tracking
+// the best (lowest-accuracy) reading seen, and finishes early the moment
+// accuracy drops to `desiredAccuracy` meters or better.
+function getBestPosition(timeoutMs = 15000, desiredAccuracy = 30) {
   return new Promise((resolve, reject) => {
-    navigator.geolocation.getCurrentPosition(
-      (pos) => resolve(pos.coords),
-      (err) => {
-        if (err.code === err.TIMEOUT) {
-          navigator.geolocation.getCurrentPosition(
-            (pos) => resolve(pos.coords),
-            (err2) => reject(err2),
-            { enableHighAccuracy: false, timeout: 30000, maximumAge: 60000 }
-          );
-        } else {
-          reject(err);
+    if (!navigator.geolocation) {
+      reject(new Error("Is browser mein location support nahi hai."));
+      return;
+    }
+    let best = null;
+    let watchId = null;
+    let finished = false;
+
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      if (best) resolve(best);
+      else reject(new Error("Location nahi mil payi. Permission allow hai aur GPS on hai, confirm karein."));
+    };
+
+    const timer = setTimeout(finish, timeoutMs);
+
+    watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        if (!best || pos.coords.accuracy < best.accuracy) {
+          best = pos.coords;
+        }
+        if (pos.coords.accuracy <= desiredAccuracy) {
+          clearTimeout(timer);
+          finish();
         }
       },
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+      (err) => {
+        if (!best) {
+          clearTimeout(timer);
+          finished = true;
+          if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+          reject(err);
+        }
+        // if a reading already exists, ignore later errors and let the
+        // timeout resolve with the best reading found so far
+      },
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0 }
     );
   });
 }
@@ -348,6 +374,7 @@ function retake() {
   $("radarBox").style.display = "none";
   $("submitBtn").style.display = "none";
   $("retakeBtn").style.display = "none";
+  $("locationChecking").style.display = "none";
   $("captureStatus").textContent = "";
   startCamera();
 }
@@ -378,7 +405,7 @@ async function captureSelfie() {
   stopCamera();
   $("captureBtn").style.display = "none";
   $("retakeBtn").style.display = "block";
-  $("captureStatus").textContent = "Location check ho rahi hai...";
+  $("captureStatus").textContent = "";
 
   if (!currentPlant || currentPlant.latitude == null) {
     $("captureStatus").textContent =
@@ -386,8 +413,20 @@ async function captureSelfie() {
     return;
   }
 
+  const countdownEl = $("locationCountdown");
+  let secondsLeft = 15;
+  countdownEl.textContent = secondsLeft;
+  $("locationChecking").style.display = "flex";
+  const countdownTimer = setInterval(() => {
+    secondsLeft = Math.max(0, secondsLeft - 1);
+    countdownEl.textContent = secondsLeft;
+  }, 1000);
+
   try {
-    const coords = await getPosition();
+    const coords = await getBestPosition();
+    clearInterval(countdownTimer);
+    $("locationChecking").style.display = "none";
+
     lastLocation = {
       lat: coords.latitude,
       lng: coords.longitude,
@@ -402,7 +441,10 @@ async function captureSelfie() {
     lastDistance = distance;
     const inRange = distance <= currentPlant.radius_meters;
 
-    $("captureStatus").textContent = "";
+    $("captureStatus").textContent =
+      coords.accuracy > 100
+        ? "GPS signal thoda weak mila — submit ho jayega, par review ke liye flag ho sakta hai."
+        : "";
     $("result").style.display = "block";
     $("distanceVal").textContent = formatDistance(distance);
     $("verdictVal").textContent = inRange ? "Plant range ke andar" : "Plant range se bahar";
@@ -413,6 +455,8 @@ async function captureSelfie() {
 
     $("submitBtn").style.display = "block";
   } catch (e) {
+    clearInterval(countdownTimer);
+    $("locationChecking").style.display = "none";
     $("captureStatus").textContent =
       "Location nahi mil payi: " + (e.message || "permission denied. Location allow karein.");
   }
