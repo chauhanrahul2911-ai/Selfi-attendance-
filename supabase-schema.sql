@@ -50,8 +50,18 @@ create table if not exists attendance (
   selfie_url text,                      -- storage path, not a public link (bucket is private)
   device_id text,
   device_mismatch_flag boolean default false,
-  status text default 'pending_review', -- 'ok' | 'flagged'
+  status text default 'pending_review', -- 'ok' | 'flagged' (clock-in)
   created_at timestamptz default now(),
+  -- clock-out fields (same verification as clock-in, filled in later via UPDATE)
+  clock_out_time timestamptz,
+  clock_out_latitude double precision,
+  clock_out_longitude double precision,
+  clock_out_gps_accuracy double precision,
+  clock_out_distance_meters double precision,
+  clock_out_within_range boolean,
+  clock_out_selfie_url text,
+  clock_out_device_mismatch_flag boolean default false,
+  clock_out_status text,
   constraint unique_employee_per_day unique (employee_id, attendance_date)
 );
 
@@ -115,6 +125,16 @@ create policy "attendance_select_all_authenticated" on attendance
 drop policy if exists "attendance_insert_authenticated" on attendance;
 create policy "attendance_insert_authenticated" on attendance
   for insert to authenticated with check (true);
+
+-- clock-out apni hi row par update kar sake (row insert clock-in ke waqt ban chuki hoti hai)
+drop policy if exists "attendance_update_own_clockout" on attendance;
+create policy "attendance_update_own_clockout" on attendance
+  for update to authenticated using (
+    employee_id in (select id from employees where lower(email) = lower(auth.jwt() ->> 'email'))
+  )
+  with check (
+    employee_id in (select id from employees where lower(email) = lower(auth.jwt() ->> 'email'))
+  );
 
 -- BLOCKED VIEWERS — koi bhi sirf apna khud ka block-status check kar sake
 drop policy if exists "blocked_viewers_select_own" on blocked_viewers;
