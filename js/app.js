@@ -15,6 +15,7 @@ let lastLocation = null;     // {lat, lng, accuracy}
 let lastDistance = null;
 let deviceMismatch = false;
 let todayAttendance = null;  // existing attendance row for today, if any
+let attendanceMode = "in";   // "in" | "out" | "done" — which action the camera flow currently performs
 
 // ---------- DATE (India-local, regardless of device timezone) ----------
 function getTodayIST() {
@@ -297,6 +298,20 @@ async function checkDeviceBinding() {
 // ============================================
 // ONE CLOCK-IN PER DAY
 // ============================================
+function setFlowLabels(mode) {
+  if (mode === "in") {
+    $("captureBtn").textContent = "📸 Selfie Le Kar Clock-In Karein";
+    $("submitBtn").textContent = "Attendance Submit Karein";
+  } else {
+    $("captureBtn").textContent = "📸 Selfie Le Kar Clock-Out Karein";
+    $("submitBtn").textContent = "Clock-Out Submit Karein";
+  }
+}
+
+function formatTime(t) {
+  return new Date(t).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+}
+
 async function checkTodayAttendance() {
   const today = getTodayIST();
   const { data } = await supabaseClient
@@ -308,19 +323,39 @@ async function checkTodayAttendance() {
 
   todayAttendance = data || null;
 
-  if (todayAttendance) {
-    $("clockInFlow").style.display = "none";
-    $("alreadyMarked").style.display = "block";
-    $("alreadyMarkedTime").textContent = new Date(
-      todayAttendance.clock_in_time
-    ).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-    const statusLabel =
-      todayAttendance.status === "ok" ? "(OK)" : "(Review ke liye flag hui)";
-    $("alreadyMarkedStatus").textContent = statusLabel;
-  } else {
+  if (!todayAttendance) {
+    // Nothing marked yet today — normal clock-in flow.
+    attendanceMode = "in";
     $("alreadyMarked").style.display = "none";
     $("clockInFlow").style.display = "block";
+    setFlowLabels("in");
+    return;
   }
+
+  if (!todayAttendance.clock_out_time) {
+    // Clocked in, still needs to clock out.
+    attendanceMode = "out";
+    const statusLabel =
+      todayAttendance.status === "ok" ? "(OK)" : "(Review ke liye flag hui)";
+    $("alreadyMarkedTime").textContent = "Clock-in: " + formatTime(todayAttendance.clock_in_time);
+    $("alreadyMarkedStatus").textContent = statusLabel;
+    $("alreadyMarked").style.display = "block";
+    $("clockInFlow").style.display = "block";
+    setFlowLabels("out");
+    return;
+  }
+
+  // Both clock-in and clock-out done for today.
+  attendanceMode = "done";
+  const hoursDecimal =
+    (new Date(todayAttendance.clock_out_time) - new Date(todayAttendance.clock_in_time)) / 3600000;
+  const h = Math.floor(hoursDecimal);
+  const m = Math.round((hoursDecimal - h) * 60);
+  $("alreadyMarkedTime").textContent =
+    `Clock-in: ${formatTime(todayAttendance.clock_in_time)} · Clock-out: ${formatTime(todayAttendance.clock_out_time)}`;
+  $("alreadyMarkedStatus").textContent = `(Total: ${h}h ${m}m)`;
+  $("alreadyMarked").style.display = "block";
+  $("clockInFlow").style.display = "none";
 }
 
 // ============================================
@@ -380,7 +415,7 @@ function retake() {
 }
 
 async function captureSelfie() {
-  if (todayAttendance) return; // safety guard
+  if (attendanceMode === "done") return; // safety guard
 
   const video = $("video");
   const canvas = $("canvas");
@@ -466,9 +501,10 @@ async function captureSelfie() {
 // SUBMIT ATTENDANCE
 // ============================================
 async function submitAttendance() {
-  if (!capturedBlob || !lastLocation || todayAttendance) return;
+  if (!capturedBlob || !lastLocation || attendanceMode === "done") return;
   $("submitBtn").disabled = true;
-  $("captureStatus").textContent = "Attendance submit ho rahi hai...";
+  $("captureStatus").textContent =
+    attendanceMode === "in" ? "Attendance submit ho rahi hai..." : "Clock-out submit ho raha hai...";
 
   try {
     const fileName = `${currentEmployee.id}/${Date.now()}.jpg`;
@@ -480,24 +516,41 @@ async function submitAttendance() {
 
     const inRange = lastDistance <= currentPlant.radius_meters;
     const lowAccuracy = lastLocation.accuracy > 50;
-    const status = deviceMismatch || lowAccuracy || !inRange ? "flagged" : "ok";
+    const rowStatus = deviceMismatch || lowAccuracy || !inRange ? "flagged" : "ok";
 
-    const { error: insertError } = await supabaseClient.from("attendance").insert({
-      employee_id: currentEmployee.id,
-      plant_id: currentPlant.id,
-      attendance_date: getTodayIST(),
-      latitude: lastLocation.lat,
-      longitude: lastLocation.lng,
-      gps_accuracy: lastLocation.accuracy,
-      distance_meters: lastDistance,
-      within_range: inRange,
-      selfie_url: fileName,
-      device_id: ensureDeviceId(),
-      device_mismatch_flag: deviceMismatch,
-      status
-    });
-
-    if (insertError) throw insertError;
+    if (attendanceMode === "in") {
+      const { error: insertError } = await supabaseClient.from("attendance").insert({
+        employee_id: currentEmployee.id,
+        plant_id: currentPlant.id,
+        attendance_date: getTodayIST(),
+        latitude: lastLocation.lat,
+        longitude: lastLocation.lng,
+        gps_accuracy: lastLocation.accuracy,
+        distance_meters: lastDistance,
+        within_range: inRange,
+        selfie_url: fileName,
+        device_id: ensureDeviceId(),
+        device_mismatch_flag: deviceMismatch,
+        status: rowStatus
+      });
+      if (insertError) throw insertError;
+    } else {
+      const { error: updateError } = await supabaseClient
+        .from("attendance")
+        .update({
+          clock_out_time: new Date().toISOString(),
+          clock_out_latitude: lastLocation.lat,
+          clock_out_longitude: lastLocation.lng,
+          clock_out_gps_accuracy: lastLocation.accuracy,
+          clock_out_distance_meters: lastDistance,
+          clock_out_within_range: inRange,
+          clock_out_selfie_url: fileName,
+          clock_out_device_mismatch_flag: deviceMismatch,
+          clock_out_status: rowStatus
+        })
+        .eq("id", todayAttendance.id);
+      if (updateError) throw updateError;
+    }
 
     $("captureStatus").textContent = "";
     $("result").style.display = "none";
@@ -506,7 +559,7 @@ async function submitAttendance() {
     $("submitBtn").style.display = "none";
     $("retakeBtn").style.display = "none";
     $("startCameraBtn").style.display = "block";
-    alert("Attendance mark ho gayi ✔");
+    alert(attendanceMode === "in" ? "Attendance mark ho gayi ✔" : "Clock-out ho gaya ✔");
     await checkTodayAttendance();
     await loadHistory();
   } catch (e) {
@@ -543,10 +596,12 @@ async function loadHistory() {
     .map((r) => {
       const tagClass = r.status === "ok" ? "in" : r.status === "flagged" ? "flag" : "out";
       const label = r.status === "ok" ? "OK" : r.status === "flagged" ? "Flagged" : r.status;
+      const outStr = r.clock_out_time ? formatTime(r.clock_out_time) : "—";
       return `
       <tr>
         <td>${new Date(r.clock_in_time).toLocaleDateString("en-IN")}</td>
-        <td>${new Date(r.clock_in_time).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</td>
+        <td>${formatTime(r.clock_in_time)}</td>
+        <td>${outStr}</td>
         <td>${formatDistance(r.distance_meters)}</td>
         <td><span class="tag ${tagClass}">${label}</span></td>
       </tr>`;
@@ -555,7 +610,7 @@ async function loadHistory() {
 
   wrap.innerHTML = `
     <table>
-      <thead><tr><th>Date</th><th>Time</th><th>Distance</th><th>Status</th></tr></thead>
+      <thead><tr><th>Date</th><th>In</th><th>Out</th><th>Distance</th><th>Status</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 }
@@ -625,6 +680,7 @@ async function renderViewerData(dateStr) {
           ? new Date(rec.clock_in_time).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
           : "—";
         const noteStr = rec && !rec.within_range ? " · range se bahar" : "";
+        const outStr = rec && rec.clock_out_time ? " · Out: " + formatTime(rec.clock_out_time) : "";
 
         const viewBtn = rec
           ? `<button class="photo-btn" data-selfie="${rec.selfie_url}" data-name="${emp.name}" data-time="${timeStr}" data-dist="${rec.distance_meters ? Math.round(rec.distance_meters) : ""}" data-lat="${rec.latitude}" data-lng="${rec.longitude}">📷 View</button>`
@@ -632,7 +688,7 @@ async function renderViewerData(dateStr) {
 
         return `
         <div class="employee-row">
-          <div><div class="empname">${emp.name}</div><div class="empmeta">${timeStr}${noteStr}</div></div>
+          <div><div class="empname">${emp.name}</div><div class="empmeta">${timeStr}${outStr}${noteStr}</div></div>
           <div class="status ${isPresent ? "green" : "red"}">● ${isPresent ? "Present" : "Absent"}</div>
           ${viewBtn}
         </div>`;
