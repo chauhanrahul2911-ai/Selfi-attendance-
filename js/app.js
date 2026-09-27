@@ -82,14 +82,14 @@ function drawRadar(distance, radius, inRange) {
   const angle = 0.9;
   const ux = cx + distPx * Math.cos(angle);
   const uy = cy + distPx * Math.sin(angle);
-  const dotColor = inRange ? "#2E7D32" : "#B3261E";
+  const dotColor = inRange ? "#1F8A63" : "#B3261E";
   return `
   <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-    <circle cx="${cx}" cy="${cy}" r="${maxR}" fill="none" stroke="#DAD5C8" stroke-width="1"/>
-    <circle cx="${cx}" cy="${cy}" r="${allowedPx}" fill="rgba(201,130,11,0.10)" stroke="#C9820B" stroke-width="1.5" stroke-dasharray="4 3"/>
-    <circle cx="${cx}" cy="${cy}" r="4" fill="#1C2541"/>
-    <line x1="${cx}" y1="${cy}" x2="${ux}" y2="${uy}" stroke="${dotColor}" stroke-width="1.2" stroke-dasharray="2 2"/>
-    <circle cx="${ux}" cy="${uy}" r="6" fill="${dotColor}"/>
+    <circle cx="${cx}" cy="${cy}" r="${maxR}" fill="none" stroke="#E1D8C2" stroke-width="1"/>
+    <circle cx="${cx}" cy="${cy}" r="${allowedPx}" fill="rgba(227,161,33,0.12)" stroke="#E3A121" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <circle cx="${cx}" cy="${cy}" r="5.5" fill="#fff" stroke="#142B27" stroke-width="2"/>
+    <line x1="${cx}" y1="${cy}" x2="${ux}" y2="${uy}" stroke="${dotColor}" stroke-width="1.4" stroke-dasharray="2.5 2.5"/>
+    <circle cx="${ux}" cy="${uy}" r="6.5" fill="${dotColor}" stroke="#fff" stroke-width="2"/>
   </svg>`;
 }
 
