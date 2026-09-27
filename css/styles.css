@@ -366,3 +366,36 @@ th{ color:var(--muted); font-weight:600; font-size:11px; }
   font-weight:800;
   color:var(--accent);
 }
+
+/* ===== CLOCK IN/OUT CHOICE CARDS ===== */
+.btn-mode:disabled{
+  opacity:0.5;
+  cursor:not-allowed;
+}
+.btn-mode:disabled:active{ transform:none; }
+
+.btn-back-inline{
+  width:auto;
+  background:none;
+  border:none;
+  color:var(--muted);
+  font-size:13px;
+  padding:0 0 12px;
+  margin:0;
+  display:block;
+}
+
+/* ===== MODAL: multi-section (clock-in + clock-out) ===== */
+.modal-inner-scroll{
+  max-height:85vh;
+  overflow-y:auto;
+}
+.modal-section-title{
+  font-weight:700;
+  font-size:14px;
+  margin:4px 0 8px;
+}
+.modal-divider{
+  border-top:1px solid var(--line);
+  margin:18px 0;
+}
