@@ -156,6 +156,20 @@ $("modeViewerBtn").addEventListener("click", () => enterMode("viewer"));
 
 document.querySelectorAll(".btn-back").forEach((b) =>
   b.addEventListener("click", () => {
+    // Employee mid-flow (camera open) → step back to the choice screen first,
+    // not all the way to landing.
+    const inEmployeeCameraFlow =
+      $("employeeSection").style.display !== "none" &&
+      $("clockInFlow").style.display !== "none";
+
+    if (inEmployeeCameraFlow) {
+      stopCamera();
+      resetCaptureState();
+      $("clockInFlow").style.display = "none";
+      $("actionChoice").style.display = "flex";
+      return;
+    }
+
     stopCamera();
     sessionStorage.removeItem("attendance_mode");
     hideAllSections();
@@ -385,13 +399,6 @@ $("clockOutChoiceBtn").addEventListener("click", () => {
   setFlowLabels("out");
   $("actionChoice").style.display = "none";
   $("clockInFlow").style.display = "block";
-});
-
-$("backToChoiceBtn").addEventListener("click", () => {
-  stopCamera();
-  resetCaptureState();
-  $("clockInFlow").style.display = "none";
-  $("actionChoice").style.display = "flex";
 });
 
 // ============================================
