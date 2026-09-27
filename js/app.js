@@ -16,6 +16,7 @@ let lastDistance = null;
 let deviceMismatch = false;
 let todayAttendance = null;  // existing attendance row for today, if any
 let attendanceMode = "in";   // "in" | "out" | "done" — which action the camera flow currently performs
+let lastAttendanceById = {}; // record id -> attendance row, for the Viewer's selfie modal
 
 // ---------- DATE (India-local, regardless of device timezone) ----------
 function getTodayIST() {
@@ -219,6 +220,7 @@ async function routeToMode(mode) {
     $("empName").textContent = currentUser.email;
     $("empPlant").textContent = "Not registered";
     $("clockInFlow").style.display = "none";
+    $("actionChoice").style.display = "none";
     return;
   }
 
@@ -296,7 +298,7 @@ async function checkDeviceBinding() {
 }
 
 // ============================================
-// ONE CLOCK-IN PER DAY
+// CLOCK-IN / CLOCK-OUT CHOICE CARDS
 // ============================================
 function setFlowLabels(mode) {
   if (mode === "in") {
@@ -312,6 +314,45 @@ function formatTime(t) {
   return new Date(t).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 }
 
+function resetCaptureState() {
+  capturedBlob = null;
+  lastLocation = null;
+  lastDistance = null;
+  $("video").style.display = "none";
+  $("selfiePreview").style.display = "none";
+  $("result").style.display = "none";
+  $("radarBox").style.display = "none";
+  $("locationChecking").style.display = "none";
+  $("submitBtn").style.display = "none";
+  $("retakeBtn").style.display = "none";
+  $("captureBtn").style.display = "none";
+  $("startCameraBtn").style.display = "block";
+  $("captureStatus").textContent = "";
+}
+
+function renderActionChoice() {
+  const inDone = !!todayAttendance;
+  const outDone = !!(todayAttendance && todayAttendance.clock_out_time);
+
+  $("clockInChoiceBtn").disabled = inDone;
+  $("clockInSub").textContent = inDone
+    ? `✓ Done — ${formatTime(todayAttendance.clock_in_time)}`
+    : "Din shuru karein";
+
+  $("clockOutChoiceBtn").disabled = !inDone || outDone;
+  if (!inDone) {
+    $("clockOutSub").textContent = "Pehle clock-in karein";
+  } else if (outDone) {
+    const hoursDecimal =
+      (new Date(todayAttendance.clock_out_time) - new Date(todayAttendance.clock_in_time)) / 3600000;
+    const h = Math.floor(hoursDecimal);
+    const m = Math.round((hoursDecimal - h) * 60);
+    $("clockOutSub").textContent = `✓ Done — ${formatTime(todayAttendance.clock_out_time)} (${h}h ${m}m)`;
+  } else {
+    $("clockOutSub").textContent = "Din khatam karein";
+  }
+}
+
 async function checkTodayAttendance() {
   const today = getTodayIST();
   const { data } = await supabaseClient
@@ -322,41 +363,36 @@ async function checkTodayAttendance() {
     .maybeSingle();
 
   todayAttendance = data || null;
+  attendanceMode = !todayAttendance ? "in" : todayAttendance.clock_out_time ? "done" : "out";
 
-  if (!todayAttendance) {
-    // Nothing marked yet today — normal clock-in flow.
-    attendanceMode = "in";
-    $("alreadyMarked").style.display = "none";
-    $("clockInFlow").style.display = "block";
-    setFlowLabels("in");
-    return;
-  }
-
-  if (!todayAttendance.clock_out_time) {
-    // Clocked in, still needs to clock out.
-    attendanceMode = "out";
-    const statusLabel =
-      todayAttendance.status === "ok" ? "(OK)" : "(Review ke liye flag hui)";
-    $("alreadyMarkedTime").textContent = "Clock-in: " + formatTime(todayAttendance.clock_in_time);
-    $("alreadyMarkedStatus").textContent = statusLabel;
-    $("alreadyMarked").style.display = "block";
-    $("clockInFlow").style.display = "block";
-    setFlowLabels("out");
-    return;
-  }
-
-  // Both clock-in and clock-out done for today.
-  attendanceMode = "done";
-  const hoursDecimal =
-    (new Date(todayAttendance.clock_out_time) - new Date(todayAttendance.clock_in_time)) / 3600000;
-  const h = Math.floor(hoursDecimal);
-  const m = Math.round((hoursDecimal - h) * 60);
-  $("alreadyMarkedTime").textContent =
-    `Clock-in: ${formatTime(todayAttendance.clock_in_time)} · Clock-out: ${formatTime(todayAttendance.clock_out_time)}`;
-  $("alreadyMarkedStatus").textContent = `(Total: ${h}h ${m}m)`;
-  $("alreadyMarked").style.display = "block";
+  resetCaptureState();
   $("clockInFlow").style.display = "none";
+  $("actionChoice").style.display = "flex";
+  renderActionChoice();
 }
+
+$("clockInChoiceBtn").addEventListener("click", () => {
+  if ($("clockInChoiceBtn").disabled) return;
+  attendanceMode = "in";
+  setFlowLabels("in");
+  $("actionChoice").style.display = "none";
+  $("clockInFlow").style.display = "block";
+});
+
+$("clockOutChoiceBtn").addEventListener("click", () => {
+  if ($("clockOutChoiceBtn").disabled) return;
+  attendanceMode = "out";
+  setFlowLabels("out");
+  $("actionChoice").style.display = "none";
+  $("clockInFlow").style.display = "block";
+});
+
+$("backToChoiceBtn").addEventListener("click", () => {
+  stopCamera();
+  resetCaptureState();
+  $("clockInFlow").style.display = "none";
+  $("actionChoice").style.display = "flex";
+});
 
 // ============================================
 // CAMERA
@@ -401,16 +437,7 @@ function stopCamera() {
 }
 
 function retake() {
-  capturedBlob = null;
-  lastLocation = null;
-  lastDistance = null;
-  $("selfiePreview").style.display = "none";
-  $("result").style.display = "none";
-  $("radarBox").style.display = "none";
-  $("submitBtn").style.display = "none";
-  $("retakeBtn").style.display = "none";
-  $("locationChecking").style.display = "none";
-  $("captureStatus").textContent = "";
+  resetCaptureState();
   startCamera();
 }
 
@@ -552,13 +579,6 @@ async function submitAttendance() {
       if (updateError) throw updateError;
     }
 
-    $("captureStatus").textContent = "";
-    $("result").style.display = "none";
-    $("radarBox").style.display = "none";
-    $("selfiePreview").style.display = "none";
-    $("submitBtn").style.display = "none";
-    $("retakeBtn").style.display = "none";
-    $("startCameraBtn").style.display = "block";
     alert(attendanceMode === "in" ? "Attendance mark ho gayi ✔" : "Clock-out ho gaya ✔");
     await checkTodayAttendance();
     await loadHistory();
@@ -662,6 +682,7 @@ async function renderViewerData(dateStr) {
 
   const attByEmployee = {};
   attendanceRows.forEach((r) => { attByEmployee[r.employee_id] = r; });
+  lastAttendanceById = {};
 
   let totalPresent = 0, totalAbsent = 0;
   sitesWrap.innerHTML = "";
@@ -676,19 +697,28 @@ async function renderViewerData(dateStr) {
         const isPresent = !!(rec && rec.within_range === true);
         if (isPresent) present++; else absent++;
 
-        const timeStr = rec
-          ? new Date(rec.clock_in_time).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
-          : "—";
-        const noteStr = rec && !rec.within_range ? " · range se bahar" : "";
-        const outStr = rec && rec.clock_out_time ? " · Out: " + formatTime(rec.clock_out_time) : "";
+        const inStr = rec ? formatTime(rec.clock_in_time) : "—";
+        const outStr = rec && rec.clock_out_time ? formatTime(rec.clock_out_time) : "—";
+        let totalStr = "0h 0m";
+        if (rec && rec.clock_out_time) {
+          const hoursDecimal = (new Date(rec.clock_out_time) - new Date(rec.clock_in_time)) / 3600000;
+          const h = Math.floor(hoursDecimal);
+          const m = Math.round((hoursDecimal - h) * 60);
+          totalStr = `${h}h ${m}m`;
+        }
+        const noteStr = rec && !rec.within_range ? " (range se bahar)" : "";
 
+        if (rec) lastAttendanceById[rec.id] = rec;
         const viewBtn = rec
-          ? `<button class="photo-btn" data-selfie="${rec.selfie_url}" data-name="${emp.name}" data-time="${timeStr}" data-dist="${rec.distance_meters ? Math.round(rec.distance_meters) : ""}" data-lat="${rec.latitude}" data-lng="${rec.longitude}">📷 View</button>`
+          ? `<button class="photo-btn" data-id="${rec.id}" data-name="${emp.name}">📷 View</button>`
           : `<button class="photo-btn" disabled>—</button>`;
 
         return `
         <div class="employee-row">
-          <div><div class="empname">${emp.name}</div><div class="empmeta">${timeStr}${outStr}${noteStr}</div></div>
+          <div>
+            <div class="empname">${emp.name}</div>
+            <div class="empmeta">In: ${inStr}${noteStr}<br>Out: ${outStr}<br>Total: ${totalStr}</div>
+          </div>
           <div class="status ${isPresent ? "green" : "red"}">● ${isPresent ? "Present" : "Absent"}</div>
           ${viewBtn}
         </div>`;
@@ -723,45 +753,79 @@ async function renderViewerData(dateStr) {
     <div class="stat"><div class="label">Absent</div><div class="num red">${totalAbsent}</div></div>
   `;
 
-  document.querySelectorAll(".photo-btn[data-selfie]").forEach((btn) => {
-    btn.addEventListener("click", () =>
-      openSelfieModal(
-        btn.dataset.selfie,
-        btn.dataset.name,
-        btn.dataset.time,
-        btn.dataset.dist,
-        btn.dataset.lat,
-        btn.dataset.lng
-      )
-    );
+  document.querySelectorAll(".photo-btn[data-id]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const rec = lastAttendanceById[btn.dataset.id];
+      if (rec) openSelfieModal(rec, btn.dataset.name);
+    });
   });
-
 }
 
-async function openSelfieModal(path, name, time, dist, lat, lng) {
-  $("modalMeta").textContent = "Loading...";
-  $("modalImg").src = "";
-  if (lat && lng) {
-    $("modalMapFrame").src = `https://maps.google.com/maps?q=${lat},${lng}&z=17&t=k&output=embed`;
-    $("modalMapFrame").style.display = "block";
-  } else {
-    $("modalMapFrame").src = "";
-    $("modalMapFrame").style.display = "none";
-  }
+function mapEmbedUrl(lat, lng) {
+  return `https://maps.google.com/maps?q=${lat},${lng}&z=17&t=k&output=embed`;
+}
+
+async function openSelfieModal(rec, name) {
   $("selfieModal").style.display = "flex";
 
-  const { data, error } = await supabaseClient.storage.from(SELFIE_BUCKET).createSignedUrl(path, 60);
-  if (error || !data) {
-    $("modalMeta").textContent = "Selfie load nahi ho payi.";
-    return;
+  // --- Clock-in section (always present when the row is clickable) ---
+  $("modalInMeta").textContent = "Loading...";
+  $("modalInImg").src = "";
+  const inTime = formatTime(rec.clock_in_time);
+  const inDist = rec.distance_meters ? Math.round(rec.distance_meters) + "m" : "";
+  if (rec.latitude && rec.longitude) {
+    $("modalInMapFrame").src = mapEmbedUrl(rec.latitude, rec.longitude);
+    $("modalInMapFrame").style.display = "block";
+  } else {
+    $("modalInMapFrame").src = "";
+    $("modalInMapFrame").style.display = "none";
   }
-  $("modalImg").src = data.signedUrl;
-  $("modalMeta").textContent = `${name} · ${time}${dist ? " · " + dist + "m" : ""}`;
+  supabaseClient.storage.from(SELFIE_BUCKET).createSignedUrl(rec.selfie_url, 60).then(({ data, error }) => {
+    if (error || !data) {
+      $("modalInMeta").textContent = "Selfie load nahi ho payi.";
+      return;
+    }
+    $("modalInImg").src = data.signedUrl;
+    $("modalInMeta").textContent = `${name} · In: ${inTime}${inDist ? " · " + inDist : ""}`;
+  });
+
+  // --- Clock-out section (only if it happened) ---
+  if (rec.clock_out_time && rec.clock_out_selfie_url) {
+    $("modalOutEmpty").style.display = "none";
+    $("modalOutImg").style.display = "block";
+    $("modalOutMeta").style.display = "block";
+    $("modalOutMeta").textContent = "Loading...";
+    $("modalOutImg").src = "";
+    const outTime = formatTime(rec.clock_out_time);
+    const outDist = rec.clock_out_distance_meters ? Math.round(rec.clock_out_distance_meters) + "m" : "";
+    if (rec.clock_out_latitude && rec.clock_out_longitude) {
+      $("modalOutMapFrame").src = mapEmbedUrl(rec.clock_out_latitude, rec.clock_out_longitude);
+      $("modalOutMapFrame").style.display = "block";
+    } else {
+      $("modalOutMapFrame").src = "";
+      $("modalOutMapFrame").style.display = "none";
+    }
+    supabaseClient.storage.from(SELFIE_BUCKET).createSignedUrl(rec.clock_out_selfie_url, 60).then(({ data, error }) => {
+      if (error || !data) {
+        $("modalOutMeta").textContent = "Selfie load nahi ho payi.";
+        return;
+      }
+      $("modalOutImg").src = data.signedUrl;
+      $("modalOutMeta").textContent = `${name} · Out: ${outTime}${outDist ? " · " + outDist : ""}`;
+    });
+  } else {
+    $("modalOutEmpty").style.display = "block";
+    $("modalOutImg").style.display = "none";
+    $("modalOutMeta").style.display = "none";
+    $("modalOutMapFrame").src = "";
+    $("modalOutMapFrame").style.display = "none";
+  }
 }
 
 $("modalCloseBtn").addEventListener("click", () => {
   $("selfieModal").style.display = "none";
-  $("modalMapFrame").src = "";
+  $("modalInMapFrame").src = "";
+  $("modalOutMapFrame").src = "";
 });
 
 // ============================================
