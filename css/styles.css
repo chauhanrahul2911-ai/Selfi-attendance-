@@ -311,12 +311,13 @@ th{ color:var(--muted); font-weight:600; font-size:11px; }
   font-size:14px;
   z-index:2;
 }
-#modalImg{
+#modalInImg, #modalOutImg{
   width:100%;
+  max-height:280px;
+  object-fit:cover;
   border-radius:8px;
   display:block;
   background:var(--paper);
-  min-height:200px;
 }
 .modal-meta{
   font-size:13px;
@@ -373,17 +374,6 @@ th{ color:var(--muted); font-weight:600; font-size:11px; }
   cursor:not-allowed;
 }
 .btn-mode:disabled:active{ transform:none; }
-
-.btn-back-inline{
-  width:auto;
-  background:none;
-  border:none;
-  color:var(--muted);
-  font-size:13px;
-  padding:0 0 12px;
-  margin:0;
-  display:block;
-}
 
 /* ===== MODAL: multi-section (clock-in + clock-out) ===== */
 .modal-inner-scroll{
