@@ -51,11 +51,21 @@
       Aapka email employee list mein register nahi hai. Admin se contact karein.
     </div>
 
-    <div id="alreadyMarked" class="info-banner" style="display:none;">
-      <span id="alreadyMarkedTime"></span> <span id="alreadyMarkedStatus"></span>
+    <div id="actionChoice" class="landing-buttons" style="display:none;">
+      <button class="btn-mode" id="clockInChoiceBtn">
+        <span class="mode-icon">🟢</span>
+        <span class="mode-label">Clock In</span>
+        <span class="mode-sub" id="clockInSub">Din shuru karein</span>
+      </button>
+      <button class="btn-mode" id="clockOutChoiceBtn">
+        <span class="mode-icon">🔴</span>
+        <span class="mode-label">Clock Out</span>
+        <span class="mode-sub" id="clockOutSub">Pehle clock-in karein</span>
+      </button>
     </div>
 
-    <div id="clockInFlow">
+    <div id="clockInFlow" style="display:none;">
+      <button class="btn-back-inline" id="backToChoiceBtn">← Wapas</button>
       <div class="camera-box">
         <video id="video" autoplay playsinline muted></video>
         <canvas id="canvas" style="display:none;"></canvas>
@@ -114,11 +124,21 @@
 
 <!-- SELFIE MODAL -->
 <div id="selfieModal" class="modal" style="display:none;">
-  <div class="modal-inner">
+  <div class="modal-inner modal-inner-scroll">
     <button class="modal-close" id="modalCloseBtn">✕</button>
-    <img id="modalImg" alt="Selfie">
-    <div id="modalMeta" class="modal-meta"></div>
-    <iframe id="modalMapFrame" class="map-frame" style="display:none;" loading="lazy"></iframe>
+
+    <div class="modal-section-title">🟢 Clock-In</div>
+    <img id="modalInImg" alt="Clock-in selfie">
+    <div id="modalInMeta" class="modal-meta"></div>
+    <iframe id="modalInMapFrame" class="map-frame" style="display:none;" loading="lazy"></iframe>
+
+    <div class="modal-divider"></div>
+
+    <div class="modal-section-title">🔴 Clock-Out</div>
+    <div id="modalOutEmpty" class="empty" style="display:none;">Clock-out abhi nahi hua.</div>
+    <img id="modalOutImg" alt="Clock-out selfie" style="display:none;">
+    <div id="modalOutMeta" class="modal-meta" style="display:none;"></div>
+    <iframe id="modalOutMapFrame" class="map-frame" style="display:none;" loading="lazy"></iframe>
   </div>
 </div>
 
