@@ -678,7 +678,7 @@ async function renderViewerData(dateStr) {
   sitesWrap.innerHTML = '<div class="empty">Loading...</div>';
 
   const [plantsRes, employeesRes, attendanceRes] = await Promise.all([
-    supabaseClient.from("plants").select("*").order("name"),
+    supabaseClient.from("plants").select("*").eq("hidden_from_viewer", false).order("name"),
     supabaseClient.from("employees").select("*").eq("is_active", true).order("sort_order").order("name"),
     supabaseClient.from("attendance").select("*").eq("attendance_date", dateStr)
   ]);
