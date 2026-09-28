@@ -55,11 +55,20 @@
       Aapka email employee list mein register nahi hai. Admin se contact karein.
     </div>
 
+    <div id="regionMismatch" class="warning-banner" style="display:none;"></div>
+
+    <div id="empRegionChoice" class="landing-buttons" style="display:none;"></div>
+
     <div id="actionChoice" class="landing-buttons" style="display:none;">
       <button class="btn-mode" id="clockInChoiceBtn">
         <span class="mode-icon">🟢</span>
         <span class="mode-label">Clock In</span>
         <span class="mode-sub" id="clockInSub">Din shuru karein</span>
+      </button>
+      <button class="btn-mode" id="midChoiceBtn" style="display:none;">
+        <span class="mode-icon">🟡</span>
+        <span class="mode-label">Dopahar</span>
+        <span class="mode-sub" id="midSub">Dopahar — beech ki hazri</span>
       </button>
       <button class="btn-mode" id="clockOutChoiceBtn">
         <span class="mode-icon">🔴</span>
@@ -113,9 +122,11 @@
       Aapko viewer access nahi hai. Admin se contact karein.
     </div>
 
+    <div id="viewerRegionChoice" class="landing-buttons" style="display:none;"></div>
+
     <div id="viewerContent" style="display:none;">
       <div class="viewer-top">
-        <h1>Attendance Dashboard</h1>
+        <h1 id="viewerTitle">Attendance Dashboard</h1>
         <input type="date" id="dateFilter">
       </div>
       <div class="stats" id="statsRow"></div>
@@ -134,6 +145,15 @@
     <img id="modalInImg" alt="Clock-in selfie">
     <div id="modalInMeta" class="modal-meta"></div>
     <iframe id="modalInMapFrame" class="map-frame" style="display:none;" loading="lazy"></iframe>
+
+    <div id="modalMidSection" style="display:none;">
+      <div class="modal-divider"></div>
+      <div class="modal-section-title">🟡 Dopahar</div>
+      <div id="modalMidEmpty" class="empty" style="display:none;">Dopahar ki hazri abhi nahi hui.</div>
+      <img id="modalMidImg" alt="Dopahar selfie" style="display:none;">
+      <div id="modalMidMeta" class="modal-meta" style="display:none;"></div>
+      <iframe id="modalMidMapFrame" class="map-frame" style="display:none;" loading="lazy"></iframe>
+    </div>
 
     <div class="modal-divider"></div>
 
