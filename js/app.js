@@ -15,8 +15,10 @@ let lastLocation = null;     // {lat, lng, accuracy}
 let lastDistance = null;
 let deviceMismatch = false;
 let todayAttendance = null;  // existing attendance row for today, if any
-let attendanceMode = "in";   // "in" | "out" | "done" — which action the camera flow currently performs
+let attendanceMode = "in";   // "in" | "mid" | "out" | "done" — which punch the camera flow currently performs
 let lastAttendanceById = {}; // record id -> attendance row, for the Viewer's selfie modal
+let lastPlantsById = {};     // plant id -> plant row, so the modal knows 2 vs 3 punches
+let viewerRegion = null;     // region the Viewer picked (e.g. "Jamjodhpur" / "Sarla")
 
 // ---------- DATE (India-local, regardless of device timezone) ----------
 function getTodayIST() {
@@ -156,17 +158,29 @@ $("modeViewerBtn").addEventListener("click", () => enterMode("viewer"));
 
 document.querySelectorAll(".btn-back").forEach((b) =>
   b.addEventListener("click", () => {
-    // Employee mid-flow (camera open) → step back to the choice screen first,
-    // not all the way to landing.
-    const inEmployeeCameraFlow =
-      $("employeeSection").style.display !== "none" &&
-      $("clockInFlow").style.display !== "none";
+    const visible = (id) => $(id).style.display !== "none";
 
-    if (inEmployeeCameraFlow) {
-      stopCamera();
-      resetCaptureState();
-      $("clockInFlow").style.display = "none";
-      $("actionChoice").style.display = "flex";
+    // One screen back at a time:
+    //   camera flow -> punch cards -> region choice -> landing
+    //   viewer dashboard -> region choice -> landing
+    if (visible("employeeSection")) {
+      if (visible("clockInFlow")) {
+        stopCamera();
+        resetCaptureState();
+        $("clockInFlow").style.display = "none";
+        $("actionChoice").style.display = "flex";
+        return;
+      }
+      if (visible("actionChoice")) {
+        $("actionChoice").style.display = "none";
+        $("regionMismatch").style.display = "none";
+        $("empRegionChoice").style.display = "flex";
+        return;
+      }
+    }
+    if (visible("viewerSection") && visible("viewerContent")) {
+      $("viewerContent").style.display = "none";
+      $("viewerRegionChoice").style.display = "flex";
       return;
     }
 
@@ -235,6 +249,7 @@ async function routeToMode(mode) {
     $("empPlant").textContent = "Not registered";
     $("clockInFlow").style.display = "none";
     $("actionChoice").style.display = "none";
+    $("empRegionChoice").style.display = "none";
     return;
   }
 
@@ -243,7 +258,8 @@ async function routeToMode(mode) {
   $("empPlant").textContent = currentPlant ? currentPlant.name : "No plant assigned";
 
   await checkDeviceBinding();
-  await checkTodayAttendance();
+  await checkTodayAttendance(false);   // load state, but don't skip past the region choice
+  await showEmployeeRegionChoice();
   await loadHistory();
 }
 
@@ -314,14 +330,117 @@ async function checkDeviceBinding() {
 // ============================================
 // CLOCK-IN / CLOCK-OUT CHOICE CARDS
 // ============================================
-function setFlowLabels(mode) {
-  if (mode === "in") {
-    $("captureBtn").textContent = "📸 Selfie Le Kar Clock-In Karein";
-    $("submitBtn").textContent = "Attendance Submit Karein";
-  } else {
-    $("captureBtn").textContent = "📸 Selfie Le Kar Clock-Out Karein";
-    $("submitBtn").textContent = "Clock-Out Submit Karein";
+// ---- Regions (Jamjodhpur / Sarla / ...) come from plants.region in the DB ----
+async function fetchRegions(onlyVisible) {
+  let q = supabaseClient.from("plants").select("region");
+  if (onlyVisible) q = q.eq("hidden_from_viewer", false);
+  const { data } = await q;
+  const list = [...new Set((data || []).map((p) => p.region || "Jamjodhpur"))].sort();
+  return list.length ? list : ["Jamjodhpur"];
+}
+
+function renderRegionButtons(container, regions, subText, onPick) {
+  container.innerHTML = "";
+  regions.forEach((r) => {
+    const b = document.createElement("button");
+    b.className = "btn-mode";
+    b.innerHTML =
+      '<span class="mode-icon">📍</span><span class="mode-label"></span><span class="mode-sub"></span>';
+    b.querySelector(".mode-label").textContent = r;
+    b.querySelector(".mode-sub").textContent = subText;
+    b.addEventListener("click", () => onPick(r));
+    container.appendChild(b);
+  });
+}
+
+async function showEmployeeRegionChoice() {
+  $("clockInFlow").style.display = "none";
+  $("actionChoice").style.display = "none";
+  $("regionMismatch").style.display = "none";
+  const regions = await fetchRegions(false);
+  renderRegionButtons($("empRegionChoice"), regions, "Yahan attendance lagayein", pickEmployeeRegion);
+  $("empRegionChoice").style.display = "flex";
+}
+
+function pickEmployeeRegion(region) {
+  const myRegion = (currentPlant && currentPlant.region) || "Jamjodhpur";
+  if (region !== myRegion) {
+    // Jamjodhpur staff can't enter Sarla and vice versa.
+    $("regionMismatch").textContent =
+      `Aap ${region} mein kaam nahi karte. Aapki site: ${currentPlant ? currentPlant.name : "—"} (${myRegion}).`;
+    $("regionMismatch").style.display = "block";
+    return;
   }
+  $("regionMismatch").style.display = "none";
+  $("empRegionChoice").style.display = "none";
+  $("actionChoice").style.display = "flex";
+  renderActionChoice();
+}
+
+// ---- Punch model: a plant has 2 punches (in/out) or 3 (in/mid/out) per day ----
+const PUNCH_NAME = { in: "clock-in", mid: "dopahar ki hazri", out: "clock-out" };
+
+const LABELS = {
+  in: {
+    capture: "📸 Selfie Le Kar Clock-In Karein",
+    submit: "Attendance Submit Karein",
+    busy: "Attendance submit ho rahi hai...",
+    ok: "Attendance mark ho gayi ✔"
+  },
+  mid: {
+    capture: "📸 Selfie Le Kar Dopahar Ki Hazri Lagayein",
+    submit: "Dopahar Hazri Submit Karein",
+    busy: "Dopahar ki hazri submit ho rahi hai...",
+    ok: "Dopahar ki hazri lag gayi ✔"
+  },
+  out: {
+    capture: "📸 Selfie Le Kar Clock-Out Karein",
+    submit: "Clock-Out Submit Karein",
+    busy: "Clock-out submit ho raha hai...",
+    ok: "Clock-out ho gaya ✔"
+  }
+};
+
+const IDLE_TEXT = {
+  2: { in: "Din shuru karein", out: "Din khatam karein" },
+  3: { in: "Subah — aane par", mid: "Dopahar — beech ki hazri", out: "Shaam — ghar jaate waqt" }
+};
+
+const CARD_IDS = {
+  in: ["clockInChoiceBtn", "clockInSub"],
+  mid: ["midChoiceBtn", "midSub"],
+  out: ["clockOutChoiceBtn", "clockOutSub"]
+};
+
+function punchesPerDay() {
+  return currentPlant && Number(currentPlant.punches_per_day) === 3 ? 3 : 2;
+}
+
+function punchSequence() {
+  return punchesPerDay() === 3 ? ["in", "mid", "out"] : ["in", "out"];
+}
+
+function punchTimeOf(rec, p) {
+  if (!rec) return null;
+  return p === "in" ? rec.clock_in_time : p === "mid" ? rec.mid_time : rec.clock_out_time;
+}
+
+function nextPunch(rec) {
+  for (const p of punchSequence()) {
+    if (!punchTimeOf(rec, p)) return p;
+  }
+  return "done";
+}
+
+function totalHoursText(rec) {
+  if (!rec || !rec.clock_out_time) return null;
+  const minutes = Math.round((new Date(rec.clock_out_time) - new Date(rec.clock_in_time)) / 60000);
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+function setFlowLabels(mode) {
+  $("captureBtn").textContent = LABELS[mode].capture;
+  $("submitBtn").textContent = LABELS[mode].submit;
 }
 
 function formatTime(t) {
@@ -345,29 +464,33 @@ function resetCaptureState() {
 }
 
 function renderActionChoice() {
-  const inDone = !!todayAttendance;
-  const outDone = !!(todayAttendance && todayAttendance.clock_out_time);
+  const seq = punchSequence();
+  const idle = IDLE_TEXT[seq.length];
+  const next = nextPunch(todayAttendance);
 
-  $("clockInChoiceBtn").disabled = inDone;
-  $("clockInSub").textContent = inDone
-    ? `✓ Done — ${formatTime(todayAttendance.clock_in_time)}`
-    : "Din shuru karein";
+  $("midChoiceBtn").style.display = seq.length === 3 ? "flex" : "none";
 
-  $("clockOutChoiceBtn").disabled = !inDone || outDone;
-  if (!inDone) {
-    $("clockOutSub").textContent = "Pehle clock-in karein";
-  } else if (outDone) {
-    const hoursDecimal =
-      (new Date(todayAttendance.clock_out_time) - new Date(todayAttendance.clock_in_time)) / 3600000;
-    const h = Math.floor(hoursDecimal);
-    const m = Math.round((hoursDecimal - h) * 60);
-    $("clockOutSub").textContent = `✓ Done — ${formatTime(todayAttendance.clock_out_time)} (${h}h ${m}m)`;
-  } else {
-    $("clockOutSub").textContent = "Din khatam karein";
-  }
+  seq.forEach((p, i) => {
+    const [btnId, subId] = CARD_IDS[p];
+    const t = punchTimeOf(todayAttendance, p);
+    $(btnId).disabled = next !== p;
+
+    if (t) {
+      let txt = `✓ Done — ${formatTime(t)}`;
+      if (p === "out") {
+        const total = totalHoursText(todayAttendance);
+        if (total) txt += ` (${total})`;
+      }
+      $(subId).textContent = txt;
+    } else if (next === p) {
+      $(subId).textContent = idle[p];
+    } else {
+      $(subId).textContent = `Pehle ${PUNCH_NAME[seq[i - 1]]} karein`;
+    }
+  });
 }
 
-async function checkTodayAttendance() {
+async function checkTodayAttendance(showActions = true) {
   const today = getTodayIST();
   const { data } = await supabaseClient
     .from("attendance")
@@ -377,28 +500,32 @@ async function checkTodayAttendance() {
     .maybeSingle();
 
   todayAttendance = data || null;
-  attendanceMode = !todayAttendance ? "in" : todayAttendance.clock_out_time ? "done" : "out";
+  attendanceMode = nextPunch(todayAttendance);
 
   resetCaptureState();
   $("clockInFlow").style.display = "none";
-  $("actionChoice").style.display = "flex";
   renderActionChoice();
+  if (showActions) {
+    $("empRegionChoice").style.display = "none";
+    $("actionChoice").style.display = "flex";
+  }
+}
+
+function startPunch(p) {
+  attendanceMode = p;
+  setFlowLabels(p);
+  $("actionChoice").style.display = "none";
+  $("clockInFlow").style.display = "block";
 }
 
 $("clockInChoiceBtn").addEventListener("click", () => {
-  if ($("clockInChoiceBtn").disabled) return;
-  attendanceMode = "in";
-  setFlowLabels("in");
-  $("actionChoice").style.display = "none";
-  $("clockInFlow").style.display = "block";
+  if (!$("clockInChoiceBtn").disabled) startPunch("in");
 });
-
+$("midChoiceBtn").addEventListener("click", () => {
+  if (!$("midChoiceBtn").disabled) startPunch("mid");
+});
 $("clockOutChoiceBtn").addEventListener("click", () => {
-  if ($("clockOutChoiceBtn").disabled) return;
-  attendanceMode = "out";
-  setFlowLabels("out");
-  $("actionChoice").style.display = "none";
-  $("clockInFlow").style.display = "block";
+  if (!$("clockOutChoiceBtn").disabled) startPunch("out");
 });
 
 // ============================================
@@ -536,9 +663,9 @@ async function captureSelfie() {
 // ============================================
 async function submitAttendance() {
   if (!capturedBlob || !lastLocation || attendanceMode === "done") return;
+  const L = LABELS[attendanceMode];
   $("submitBtn").disabled = true;
-  $("captureStatus").textContent =
-    attendanceMode === "in" ? "Attendance submit ho rahi hai..." : "Clock-out submit ho raha hai...";
+  $("captureStatus").textContent = L.busy;
 
   try {
     const fileName = `${currentEmployee.id}/${Date.now()}.jpg`;
@@ -569,24 +696,27 @@ async function submitAttendance() {
       });
       if (insertError) throw insertError;
     } else {
+      // mid  -> mid_* columns,  out -> clock_out_* columns (same row as clock-in)
+      const prefix = attendanceMode === "mid" ? "mid_" : "clock_out_";
+      const payload = {};
+      payload[prefix + "time"] = new Date().toISOString();
+      payload[prefix + "latitude"] = lastLocation.lat;
+      payload[prefix + "longitude"] = lastLocation.lng;
+      payload[prefix + "gps_accuracy"] = lastLocation.accuracy;
+      payload[prefix + "distance_meters"] = lastDistance;
+      payload[prefix + "within_range"] = inRange;
+      payload[prefix + "selfie_url"] = fileName;
+      payload[prefix + "device_mismatch_flag"] = deviceMismatch;
+      payload[prefix + "status"] = rowStatus;
+
       const { error: updateError } = await supabaseClient
         .from("attendance")
-        .update({
-          clock_out_time: new Date().toISOString(),
-          clock_out_latitude: lastLocation.lat,
-          clock_out_longitude: lastLocation.lng,
-          clock_out_gps_accuracy: lastLocation.accuracy,
-          clock_out_distance_meters: lastDistance,
-          clock_out_within_range: inRange,
-          clock_out_selfie_url: fileName,
-          clock_out_device_mismatch_flag: deviceMismatch,
-          clock_out_status: rowStatus
-        })
+        .update(payload)
         .eq("id", todayAttendance.id);
       if (updateError) throw updateError;
     }
 
-    alert(attendanceMode === "in" ? "Attendance mark ho gayi ✔" : "Clock-out ho gaya ✔");
+    alert(L.ok);
     await checkTodayAttendance();
     await loadHistory();
   } catch (e) {
@@ -619,17 +749,21 @@ async function loadHistory() {
     return;
   }
 
+  const is3 = punchesPerDay() === 3;
+
   const rows = data
     .map((r) => {
       const tagClass = r.status === "ok" ? "in" : r.status === "flagged" ? "flag" : "out";
       const label = r.status === "ok" ? "OK" : r.status === "flagged" ? "Flagged" : r.status;
+      const midStr = r.mid_time ? formatTime(r.mid_time) : "—";
       const outStr = r.clock_out_time ? formatTime(r.clock_out_time) : "—";
       return `
       <tr>
         <td>${new Date(r.clock_in_time).toLocaleDateString("en-IN")}</td>
         <td>${formatTime(r.clock_in_time)}</td>
+        ${is3 ? `<td>${midStr}</td>` : ""}
         <td>${outStr}</td>
-        <td>${formatDistance(r.distance_meters)}</td>
+        ${is3 ? "" : `<td>${formatDistance(r.distance_meters)}</td>`}
         <td><span class="tag ${tagClass}">${label}</span></td>
       </tr>`;
     })
@@ -637,7 +771,7 @@ async function loadHistory() {
 
   wrap.innerHTML = `
     <table>
-      <thead><tr><th>Date</th><th>In</th><th>Out</th><th>Distance</th><th>Status</th></tr></thead>
+      <thead><tr><th>Date</th><th>In</th>${is3 ? "<th>Mid</th>" : ""}<th>Out</th>${is3 ? "" : "<th>Distance</th>"}<th>Status</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 }
@@ -649,6 +783,7 @@ async function loadViewer() {
   $("viewerSection").style.display = "block";
   $("viewerDenied").style.display = "none";
   $("viewerContent").style.display = "none";
+  $("viewerRegionChoice").style.display = "none";
 
   const email = (currentUser.email || "").trim().toLowerCase();
   const { data: blocked } = await supabaseClient
@@ -663,12 +798,20 @@ async function loadViewer() {
     return;
   }
 
-  $("viewerContent").style.display = "block";
+  const regions = await fetchRegions(true);
+  renderRegionButtons($("viewerRegionChoice"), regions, "Attendance dekhein", pickViewerRegion);
+  $("viewerRegionChoice").style.display = "flex";
+}
 
+function pickViewerRegion(region) {
+  viewerRegion = region;
+  $("viewerRegionChoice").style.display = "none";
+  $("viewerContent").style.display = "block";
+  $("viewerTitle").textContent = `${region} Attendance`;
   if (!$("dateFilter").value) {
     $("dateFilter").value = getTodayIST();
   }
-  await renderViewerData($("dateFilter").value);
+  renderViewerData($("dateFilter").value);
 }
 
 $("dateFilter").addEventListener("change", (e) => renderViewerData(e.target.value));
@@ -677,8 +820,11 @@ async function renderViewerData(dateStr) {
   const sitesWrap = $("sitesWrap");
   sitesWrap.innerHTML = '<div class="empty">Loading...</div>';
 
+  let plantsQuery = supabaseClient.from("plants").select("*").eq("hidden_from_viewer", false);
+  if (viewerRegion) plantsQuery = plantsQuery.eq("region", viewerRegion);
+
   const [plantsRes, employeesRes, attendanceRes] = await Promise.all([
-    supabaseClient.from("plants").select("*").eq("hidden_from_viewer", false).order("name"),
+    plantsQuery.order("name"),
     supabaseClient.from("employees").select("*").eq("is_active", true).order("sort_order").order("name"),
     supabaseClient.from("attendance").select("*").eq("attendance_date", dateStr)
   ]);
@@ -690,11 +836,14 @@ async function renderViewerData(dateStr) {
   const attByEmployee = {};
   attendanceRows.forEach((r) => { attByEmployee[r.employee_id] = r; });
   lastAttendanceById = {};
+  lastPlantsById = {};
 
   let totalPresent = 0, totalAbsent = 0;
   sitesWrap.innerHTML = "";
 
   plants.forEach((plant) => {
+    lastPlantsById[plant.id] = plant;
+    const is3 = Number(plant.punches_per_day) === 3;
     const plantEmployees = employees.filter((e) => e.plant_id === plant.id);
     let present = 0, absent = 0;
 
@@ -705,14 +854,9 @@ async function renderViewerData(dateStr) {
         if (isPresent) present++; else absent++;
 
         const inStr = rec ? formatTime(rec.clock_in_time) : "—";
+        const midStr = rec && rec.mid_time ? formatTime(rec.mid_time) : "—";
         const outStr = rec && rec.clock_out_time ? formatTime(rec.clock_out_time) : "—";
-        let totalStr = "0h 0m";
-        if (rec && rec.clock_out_time) {
-          const hoursDecimal = (new Date(rec.clock_out_time) - new Date(rec.clock_in_time)) / 3600000;
-          const h = Math.floor(hoursDecimal);
-          const m = Math.round((hoursDecimal - h) * 60);
-          totalStr = `${h}h ${m}m`;
-        }
+        const totalStr = totalHoursText(rec) || "0h 0m";
         const noteStr = rec && !rec.within_range ? " (range se bahar)" : "";
 
         if (rec) lastAttendanceById[rec.id] = rec;
@@ -724,7 +868,7 @@ async function renderViewerData(dateStr) {
         <div class="employee-row">
           <div>
             <div class="empname">${emp.name}</div>
-            <div class="empmeta">In: ${inStr}${noteStr}<br>Out: ${outStr}<br>Total: ${totalStr}</div>
+            <div class="empmeta">In: ${inStr}${noteStr}${is3 ? `<br>Mid: ${midStr}` : ""}<br>Out: ${outStr}<br>Total: ${totalStr}</div>
           </div>
           <div class="status ${isPresent ? "green" : "red"}">● ${isPresent ? "Present" : "Absent"}</div>
           ${viewBtn}
@@ -772,66 +916,84 @@ function mapEmbedUrl(lat, lng) {
   return `https://maps.google.com/maps?q=${lat},${lng}&z=17&t=k&output=embed`;
 }
 
+const MODAL_SECTIONS = {
+  in:  { img: "modalInImg",  meta: "modalInMeta",  map: "modalInMapFrame" },
+  mid: { img: "modalMidImg", meta: "modalMidMeta", map: "modalMidMapFrame", empty: "modalMidEmpty" },
+  out: { img: "modalOutImg", meta: "modalOutMeta", map: "modalOutMapFrame", empty: "modalOutEmpty" }
+};
+
+// data = {time, selfie, lat, lng, dist}, or null when that punch hasn't happened yet
+function fillModalSection(sec, data, name, label) {
+  if (!data) {
+    if (sec.empty) $(sec.empty).style.display = "block";
+    $(sec.img).style.display = "none";
+    $(sec.meta).style.display = "none";
+    $(sec.map).src = "";
+    $(sec.map).style.display = "none";
+    return;
+  }
+
+  if (sec.empty) $(sec.empty).style.display = "none";
+  $(sec.img).style.display = "block";
+  $(sec.img).src = "";
+  $(sec.meta).style.display = "block";
+  $(sec.meta).textContent = "Loading...";
+
+  if (data.lat && data.lng) {
+    $(sec.map).src = mapEmbedUrl(data.lat, data.lng);
+    $(sec.map).style.display = "block";
+  } else {
+    $(sec.map).src = "";
+    $(sec.map).style.display = "none";
+  }
+
+  const dist = data.dist ? Math.round(data.dist) + "m" : "";
+  supabaseClient.storage.from(SELFIE_BUCKET).createSignedUrl(data.selfie, 60).then(({ data: signed, error }) => {
+    if (error || !signed) {
+      $(sec.meta).textContent = "Selfie load nahi ho payi.";
+      return;
+    }
+    $(sec.img).src = signed.signedUrl;
+    $(sec.meta).textContent = `${name} · ${label}: ${formatTime(data.time)}${dist ? " · " + dist : ""}`;
+  });
+}
+
 async function openSelfieModal(rec, name) {
   $("selfieModal").style.display = "flex";
 
-  // --- Clock-in section (always present when the row is clickable) ---
-  $("modalInMeta").textContent = "Loading...";
-  $("modalInImg").src = "";
-  const inTime = formatTime(rec.clock_in_time);
-  const inDist = rec.distance_meters ? Math.round(rec.distance_meters) + "m" : "";
-  if (rec.latitude && rec.longitude) {
-    $("modalInMapFrame").src = mapEmbedUrl(rec.latitude, rec.longitude);
-    $("modalInMapFrame").style.display = "block";
-  } else {
-    $("modalInMapFrame").src = "";
-    $("modalInMapFrame").style.display = "none";
-  }
-  supabaseClient.storage.from(SELFIE_BUCKET).createSignedUrl(rec.selfie_url, 60).then(({ data, error }) => {
-    if (error || !data) {
-      $("modalInMeta").textContent = "Selfie load nahi ho payi.";
-      return;
-    }
-    $("modalInImg").src = data.signedUrl;
-    $("modalInMeta").textContent = `${name} · In: ${inTime}${inDist ? " · " + inDist : ""}`;
-  });
+  const plant = lastPlantsById[rec.plant_id];
+  const is3 = !!plant && Number(plant.punches_per_day) === 3;
+  $("modalMidSection").style.display = is3 ? "block" : "none";
 
-  // --- Clock-out section (only if it happened) ---
-  if (rec.clock_out_time && rec.clock_out_selfie_url) {
-    $("modalOutEmpty").style.display = "none";
-    $("modalOutImg").style.display = "block";
-    $("modalOutMeta").style.display = "block";
-    $("modalOutMeta").textContent = "Loading...";
-    $("modalOutImg").src = "";
-    const outTime = formatTime(rec.clock_out_time);
-    const outDist = rec.clock_out_distance_meters ? Math.round(rec.clock_out_distance_meters) + "m" : "";
-    if (rec.clock_out_latitude && rec.clock_out_longitude) {
-      $("modalOutMapFrame").src = mapEmbedUrl(rec.clock_out_latitude, rec.clock_out_longitude);
-      $("modalOutMapFrame").style.display = "block";
-    } else {
-      $("modalOutMapFrame").src = "";
-      $("modalOutMapFrame").style.display = "none";
-    }
-    supabaseClient.storage.from(SELFIE_BUCKET).createSignedUrl(rec.clock_out_selfie_url, 60).then(({ data, error }) => {
-      if (error || !data) {
-        $("modalOutMeta").textContent = "Selfie load nahi ho payi.";
-        return;
-      }
-      $("modalOutImg").src = data.signedUrl;
-      $("modalOutMeta").textContent = `${name} · Out: ${outTime}${outDist ? " · " + outDist : ""}`;
-    });
-  } else {
-    $("modalOutEmpty").style.display = "block";
-    $("modalOutImg").style.display = "none";
-    $("modalOutMeta").style.display = "none";
-    $("modalOutMapFrame").src = "";
-    $("modalOutMapFrame").style.display = "none";
+  fillModalSection(
+    MODAL_SECTIONS.in,
+    { time: rec.clock_in_time, selfie: rec.selfie_url, lat: rec.latitude, lng: rec.longitude, dist: rec.distance_meters },
+    name, "In"
+  );
+
+  if (is3) {
+    fillModalSection(
+      MODAL_SECTIONS.mid,
+      rec.mid_time && rec.mid_selfie_url
+        ? { time: rec.mid_time, selfie: rec.mid_selfie_url, lat: rec.mid_latitude, lng: rec.mid_longitude, dist: rec.mid_distance_meters }
+        : null,
+      name, "Dopahar"
+    );
   }
+
+  fillModalSection(
+    MODAL_SECTIONS.out,
+    rec.clock_out_time && rec.clock_out_selfie_url
+      ? { time: rec.clock_out_time, selfie: rec.clock_out_selfie_url, lat: rec.clock_out_latitude, lng: rec.clock_out_longitude, dist: rec.clock_out_distance_meters }
+      : null,
+    name, "Out"
+  );
 }
 
 $("modalCloseBtn").addEventListener("click", () => {
   $("selfieModal").style.display = "none";
   $("modalInMapFrame").src = "";
+  $("modalMidMapFrame").src = "";
   $("modalOutMapFrame").src = "";
 });
 
