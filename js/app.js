@@ -161,22 +161,14 @@ document.querySelectorAll(".btn-back").forEach((b) =>
     const visible = (id) => $(id).style.display !== "none";
 
     // One screen back at a time:
-    //   camera flow -> punch cards -> region choice -> landing
+    //   camera flow -> punch cards -> landing
     //   viewer dashboard -> region choice -> landing
-    if (visible("employeeSection")) {
-      if (visible("clockInFlow")) {
-        stopCamera();
-        resetCaptureState();
-        $("clockInFlow").style.display = "none";
-        $("actionChoice").style.display = "flex";
-        return;
-      }
-      if (visible("actionChoice")) {
-        $("actionChoice").style.display = "none";
-        $("regionMismatch").style.display = "none";
-        $("empRegionChoice").style.display = "flex";
-        return;
-      }
+    if (visible("employeeSection") && visible("clockInFlow")) {
+      stopCamera();
+      resetCaptureState();
+      $("clockInFlow").style.display = "none";
+      $("actionChoice").style.display = "flex";
+      return;
     }
     if (visible("viewerSection") && visible("viewerContent")) {
       $("viewerContent").style.display = "none";
@@ -249,7 +241,6 @@ async function routeToMode(mode) {
     $("empPlant").textContent = "Not registered";
     $("clockInFlow").style.display = "none";
     $("actionChoice").style.display = "none";
-    $("empRegionChoice").style.display = "none";
     return;
   }
 
@@ -258,8 +249,7 @@ async function routeToMode(mode) {
   $("empPlant").textContent = currentPlant ? currentPlant.name : "No plant assigned";
 
   await checkDeviceBinding();
-  await checkTodayAttendance(false);   // load state, but don't skip past the region choice
-  await showEmployeeRegionChoice();
+  await checkTodayAttendance(); // shows this employee's own punch cards directly
   await loadHistory();
 }
 
@@ -351,30 +341,6 @@ function renderRegionButtons(container, regions, subText, onPick) {
     b.addEventListener("click", () => onPick(r));
     container.appendChild(b);
   });
-}
-
-async function showEmployeeRegionChoice() {
-  $("clockInFlow").style.display = "none";
-  $("actionChoice").style.display = "none";
-  $("regionMismatch").style.display = "none";
-  const regions = await fetchRegions(false);
-  renderRegionButtons($("empRegionChoice"), regions, "Yahan attendance lagayein", pickEmployeeRegion);
-  $("empRegionChoice").style.display = "flex";
-}
-
-function pickEmployeeRegion(region) {
-  const myRegion = (currentPlant && currentPlant.region) || "Jamjodhpur";
-  if (region !== myRegion) {
-    // Jamjodhpur staff can't enter Sarla and vice versa.
-    $("regionMismatch").textContent =
-      `Aap ${region} mein kaam nahi karte. Aapki site: ${currentPlant ? currentPlant.name : "—"} (${myRegion}).`;
-    $("regionMismatch").style.display = "block";
-    return;
-  }
-  $("regionMismatch").style.display = "none";
-  $("empRegionChoice").style.display = "none";
-  $("actionChoice").style.display = "flex";
-  renderActionChoice();
 }
 
 // ---- Punch model: a plant has 2 punches (in/out) or 3 (in/mid/out) per day ----
@@ -490,7 +456,7 @@ function renderActionChoice() {
   });
 }
 
-async function checkTodayAttendance(showActions = true) {
+async function checkTodayAttendance() {
   const today = getTodayIST();
   const { data } = await supabaseClient
     .from("attendance")
@@ -505,10 +471,7 @@ async function checkTodayAttendance(showActions = true) {
   resetCaptureState();
   $("clockInFlow").style.display = "none";
   renderActionChoice();
-  if (showActions) {
-    $("empRegionChoice").style.display = "none";
-    $("actionChoice").style.display = "flex";
-  }
+  $("actionChoice").style.display = "flex";
 }
 
 function startPunch(p) {
