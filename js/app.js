@@ -326,7 +326,7 @@ async function fetchRegions(onlyVisible) {
   if (onlyVisible) q = q.eq("hidden_from_viewer", false);
   const { data } = await q;
   const list = [...new Set((data || []).map((p) => p.region || "Jamjodhpur"))].sort();
-  return list.length ? list : ["Jamjodhpur"];
+  return list.length ? list : [""];
 }
 
 function renderRegionButtons(container, regions, subText, onPick) {
