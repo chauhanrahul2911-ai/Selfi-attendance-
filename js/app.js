@@ -19,6 +19,7 @@ let attendanceMode = "in";   // "in" | "mid" | "out" | "done" — which punch th
 let lastAttendanceById = {}; // record id -> attendance row, for the Viewer's selfie modal
 let lastPlantsById = {};     // plant id -> plant row, so the modal knows 2 vs 3 punches
 let viewerRegion = null;     // region the Viewer picked (e.g. "Jamjodhpur" / "Sarla")
+let viewerRegionPickerAvailable = false; // true only when an outsider saw the region picker
 
 // ---------- DATE (India-local, regardless of device timezone) ----------
 function getTodayIST() {
@@ -170,7 +171,7 @@ document.querySelectorAll(".btn-back").forEach((b) =>
       $("actionChoice").style.display = "flex";
       return;
     }
-    if (visible("viewerSection") && visible("viewerContent")) {
+    if (visible("viewerSection") && visible("viewerContent") && viewerRegionPickerAvailable) {
       $("viewerContent").style.display = "none";
       $("viewerRegionChoice").style.display = "flex";
       return;
@@ -326,7 +327,7 @@ async function fetchRegions(onlyVisible) {
   if (onlyVisible) q = q.eq("hidden_from_viewer", false);
   const { data } = await q;
   const list = [...new Set((data || []).map((p) => p.region || "Jamjodhpur"))].sort();
-  return list.length ? list : ["site under maintenance"];
+  return list.length ? list : ["Jamjodhpur"];
 }
 
 function renderRegionButtons(container, regions, subText, onPick) {
@@ -761,6 +762,16 @@ async function loadViewer() {
     return;
   }
 
+  // Registered employee (Rahul, Ajay, ...) -> straight to their own region's
+  // dashboard, no picker, no other region's data.
+  if (currentEmployee && currentPlant) {
+    viewerRegionPickerAvailable = false;
+    pickViewerRegion(currentPlant.region || "Jamjodhpur");
+    return;
+  }
+
+  // Outsider / unregistered Google account -> free to pick any region.
+  viewerRegionPickerAvailable = true;
   const regions = await fetchRegions(true);
   renderRegionButtons($("viewerRegionChoice"), regions, "Attendance dekhein", pickViewerRegion);
   $("viewerRegionChoice").style.display = "flex";
