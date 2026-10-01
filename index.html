@@ -15,18 +15,27 @@
 
   <!-- LANDING: choose Employee or Viewer -->
   <section id="landingSection" style="display:none;">
-    <h1>Selfie Attendance</h1>
+    <img class="hero-illustration" src="assets/hero-illustration.webp" alt="" width="112" height="117">
+    <div class="eyebrow">SMART ATTENDANCE SYSTEM</div>
+    <h1>Selfie<span class="grad">Attendance</span></h1>
     <p class="sub">Aap kaun hain, select karein.</p>
+    <div class="hero-underline"></div>
     <div class="landing-buttons">
-      <button class="btn-mode" id="modeEmployeeBtn">
-        <span class="mode-icon">🧑‍🔧</span>
-        <span class="mode-label">Employee</span>
-        <span class="mode-sub">Clock-in karein</span>
+      <button class="btn-mode-dark accent-green" id="modeEmployeeBtn">
+        <img class="card-icon" src="assets/icons/person.svg" alt="">
+        <span class="card-text">
+          <span class="card-label">Employee</span>
+          <span class="card-sub">Clock-in karein</span>
+        </span>
+        <img class="card-arrow" src="assets/icons/arrow.svg" alt="">
       </button>
-      <button class="btn-mode" id="modeViewerBtn">
-        <span class="mode-icon">📋</span>
-        <span class="mode-label">Viewer</span>
-        <span class="mode-sub">Attendance dekhein</span>
+      <button class="btn-mode-dark accent-blue" id="modeViewerBtn">
+        <img class="card-icon" src="assets/icons/clipboard.svg" alt="">
+        <span class="card-text">
+          <span class="card-label">Viewer</span>
+          <span class="card-sub">Attendance dekhein</span>
+        </span>
+        <img class="card-arrow" src="assets/icons/arrow.svg" alt="">
       </button>
     </div>
     <div class="status-msg" id="landingStatus"></div>
