@@ -202,14 +202,18 @@ tbody tr:last-child td{ border-bottom:none; }
   overflow:hidden;
   background:
     radial-gradient(480px 320px at 94% -12%, rgba(227,161,33,0.26), transparent 62%),
-    repeating-linear-gradient(115deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 24px),
     var(--ink);
   border:none;
   box-shadow:none;
-  margin:0 -18px 16px;
+  margin:0 -18px 0;
   padding:40px 18px 28px;
-  border-radius:0 0 var(--radius-lg) var(--radius-lg);
+  border-radius:0;
+  min-height:100vh;
+  min-height:100dvh;
+  display:flex;
+  flex-direction:column;
 }
+#landingSection .landing-buttons{ margin-top:auto; padding-bottom:12px; }
 #landingSection .hero-illustration{
   position:absolute;
   top:16px;
@@ -250,7 +254,6 @@ tbody tr:last-child td{ border-bottom:none; }
   margin:14px 0 4px;
   background:linear-gradient(90deg,#3FE0B0,#4F9BE8);
 }
-#landingSection .landing-buttons{ margin-top:26px; }
 #landingSection .status-msg{ color:rgba(255,255,255,0.65); text-align:center; }
 
 .landing-buttons{
