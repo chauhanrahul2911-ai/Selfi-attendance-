@@ -20,6 +20,9 @@ create table if not exists plants (
   latitude double precision,
   longitude double precision,
   radius_meters integer not null default 150,
+  hidden_from_viewer boolean default false, -- true = clock-in still works, just excluded from Viewer dashboard list
+  region text not null default 'Jamjodhpur', -- groups sites; Employee/Viewer pick a region first (staff can't cross regions)
+  punches_per_day integer not null default 2, -- 2 = clock-in/out, 3 = clock-in + dopahar (mid) + clock-out
   created_at timestamptz default now()
 );
 
@@ -33,6 +36,7 @@ create table if not exists employees (
   device_locked boolean default false,
   is_admin boolean default false,       -- true = can also open the Viewer dashboard
   is_active boolean default true,
+  sort_order integer default 0,         -- Viewer shows employees of a site in this order (small number first)
   created_at timestamptz default now()
 );
 
@@ -62,6 +66,16 @@ create table if not exists attendance (
   clock_out_selfie_url text,
   clock_out_device_mismatch_flag boolean default false,
   clock_out_status text,
+  -- dopahar (mid-day) punch — only used by plants with punches_per_day = 3 (Sarla)
+  mid_time timestamptz,
+  mid_latitude double precision,
+  mid_longitude double precision,
+  mid_gps_accuracy double precision,
+  mid_distance_meters double precision,
+  mid_within_range boolean,
+  mid_selfie_url text,
+  mid_device_mismatch_flag boolean default false,
+  mid_status text,
   constraint unique_employee_per_day unique (employee_id, attendance_date)
 );
 
@@ -155,13 +169,18 @@ create policy "selfies_select_authenticated" on storage.objects
 -- ============================================
 -- 5. SEED DATA — apne 5 known sites (naye project mein already daal do)
 -- ============================================
-insert into plants (name, latitude, longitude, radius_meters) values
-  ('24GreenPark',    21.942867, 70.050572, 150),
-  ('Maruti Solar',   22.010581, 70.037650, 150),
-  ('AGEPL Nandana',  21.981487, 70.055912, 150),
-  ('AGEPL Dhrafa',   21.981819, 70.093543, 150),
-  ('Office',         21.907182, 70.036780, 150)
+insert into plants (name, latitude, longitude, radius_meters, region, punches_per_day) values
+  ('24GreenPark',    21.942867, 70.050572, 400, 'Jamjodhpur', 2),
+  ('Maruti Solar',   22.010581, 70.037650, 400, 'Jamjodhpur', 2),
+  ('Madhav Solar',   22.008677, 70.036712, 400, 'Jamjodhpur', 2),
+  ('AGEPL Nandana',  21.981487, 70.055912, 400, 'Jamjodhpur', 2),
+  ('AGEPL Dhrafa',   21.981819, 70.093543, 400, 'Jamjodhpur', 2),
+  ('Office',         21.907182, 70.036780, 400, 'Jamjodhpur', 2)
 on conflict (name) do nothing;
+
+-- Sarla plant — apni asli latitude/longitude daal ke uncomment karo:
+-- insert into plants (name, latitude, longitude, radius_meters, region, punches_per_day)
+-- values ('AGEPL Sarla', 00.000000, 00.000000, 400, 'Sarla', 3);
 
 -- ============================================
 -- 6. EMPLOYEES SEED — yeh tumhe khud generate karna hai (backup lete waqt)

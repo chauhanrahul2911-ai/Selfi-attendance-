@@ -172,7 +172,33 @@ where tablename in ('plants','employees','attendance','blocked_viewers')
 or (schemaname = 'storage' and tablename = 'objects');
 ```
 
-**Future mein kisi bhi site ka order badalna ho to bas number update karna:**
+---
+
+## Regions (Jamjodhpur / Sarla) aur 3-punch sites
+
+Har site ka ek `region` hota hai. Employee aur Viewer dono pehle region choose karte hain — Jamjodhpur ka employee Sarla mein, aur Sarla ka Jamjodhpur mein nahi ghus sakta. Region list DB se automatically banti hai, naya region add karne ke liye code change nahi chahiye.
+
+**Naya site kisi region mein add karna**
 ```sql
-update employees set sort_order = 1 where name = 'Employee Ka Naam';
+insert into plants (name, latitude, longitude, radius_meters, region, punches_per_day)
+values ('Site Ka Naam', 21.xxxxxx, 70.xxxxxx, 400, 'Sarla', 3);
+```
+
+**`punches_per_day`:** `2` = Clock In + Clock Out. `3` = Clock In + Dopahar + Clock Out.
+
+**Kisi site ko 2 se 3 punch (ya wapas) karna**
+```sql
+update plants set punches_per_day = 3 where name = 'Site Ka Naam';
+```
+
+**Site ko doosre region mein shift karna**
+```sql
+update plants set region = 'Sarla' where name = 'Site Ka Naam';
+```
+
+**Sarla mein naya employee add karna**
+```sql
+insert into employees (plant_id, name, email)
+select id, 'Employee Ka Naam', 'unka.email@gmail.com'
+from plants where name = 'AGEPL Sarla';
 ```
