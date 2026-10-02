@@ -16,6 +16,8 @@
   --good-wash:#E5F3EC;
   --bad:#B3261E;
   --bad-wash:#FBEAE9;
+  --blue:#4F6FE8;
+  --blue-wash:rgba(79,111,232,0.12);
   --line:#E1D8C2;
   --line-strong:#CDBFA0;
   --muted:#6E6252;
@@ -263,32 +265,56 @@ tbody tr:last-child td{ border-bottom:none; }
   margin-top:8px;
 }
 
-/* light-theme cards (still used by action-choice / region-choice screens) */
+/* light-theme cards (action-choice / region-choice screens) — same row
+   pattern as the landing screen's dark cards: icon box, text, arrow. */
 .btn-mode{
   display:flex;
-  flex-direction:column;
-  align-items:flex-start;
-  gap:2px;
+  flex-direction:row;
+  align-items:center;
+  gap:14px;
   background:var(--panel);
   border:1px solid var(--line);
+  border-left:4px solid var(--card-accent, var(--accent));
   border-radius:var(--radius-md);
-  padding:18px;
+  padding:16px;
   text-align:left;
   width:100%;
   box-shadow:var(--shadow-raised);
 }
+.btn-mode.accent-green{ --card-accent:var(--good); }
+.btn-mode.accent-blue{ --card-accent:var(--blue); }
+.btn-mode.accent-amber{ --card-accent:var(--accent); }
+
 .mode-icon{
-  font-size:22px;
-  margin-bottom:6px;
-  width:42px; height:42px;
+  font-size:21px;
+  width:50px; height:50px;
+  flex-shrink:0;
   display:flex; align-items:center; justify-content:center;
   background:var(--accent-wash);
-  border-radius:10px;
+  border-radius:13px;
 }
+.btn-mode.accent-green .mode-icon{ background:var(--good-wash); }
+.btn-mode.accent-blue .mode-icon{ background:var(--blue-wash); }
+.btn-mode.accent-amber .mode-icon{ background:var(--accent-wash); }
+
+.mode-text{ flex:1; display:flex; flex-direction:column; gap:2px; }
 .mode-label{ font-family:var(--font-display); font-size:16px; font-weight:700; color:var(--ink); }
 .mode-sub{ font-size:12.5px; color:var(--muted); }
+
+.mode-arrow{
+  width:34px; height:34px;
+  flex-shrink:0;
+  border-radius:50%;
+  background:var(--ink);
+  color:var(--white);
+  display:flex; align-items:center; justify-content:center;
+  font-size:16px;
+  line-height:1;
+}
+
 .btn-mode:disabled{ opacity:0.5; cursor:not-allowed; }
 .btn-mode:disabled:active{ transform:none; }
+.btn-mode:disabled .mode-arrow{ background:var(--line-strong); }
 
 /* dark cards — landing screen only (Employee / Viewer) */
 .btn-mode-dark{
