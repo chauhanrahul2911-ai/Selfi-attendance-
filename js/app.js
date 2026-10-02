@@ -331,12 +331,15 @@ async function fetchRegions(onlyVisible) {
 }
 
 function renderRegionButtons(container, regions, subText, onPick) {
+  const accents = ["accent-green", "accent-blue", "accent-amber"];
   container.innerHTML = "";
-  regions.forEach((r) => {
+  regions.forEach((r, i) => {
     const b = document.createElement("button");
-    b.className = "btn-mode";
+    b.className = "btn-mode " + accents[i % accents.length];
     b.innerHTML =
-      '<span class="mode-icon">📍</span><span class="mode-label"></span><span class="mode-sub"></span>';
+      '<span class="mode-icon">📍</span>' +
+      '<span class="mode-text"><span class="mode-label"></span><span class="mode-sub"></span></span>' +
+      '<span class="mode-arrow">→</span>';
     b.querySelector(".mode-label").textContent = r;
     b.querySelector(".mode-sub").textContent = subText;
     b.addEventListener("click", () => onPick(r));
