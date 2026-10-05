@@ -887,6 +887,145 @@ async function renderViewerData(dateStr) {
       if (rec) openSelfieModal(rec, btn.dataset.name);
     });
   });
+
+  await renderAdminPanel(plants);
+}
+
+// ============================================
+// ADMIN PANEL — Sarla employees only (is_admin required)
+// ============================================
+async function renderAdminPanel(regionPlants) {
+  const panel = $("adminPanel");
+  const show = viewerRegion === "Sarla" && !!(currentEmployee && currentEmployee.is_admin);
+  if (!show) {
+    panel.style.display = "none";
+    panel.innerHTML = "";
+    return;
+  }
+  panel.style.display = "block";
+
+  const plantIds = regionPlants.map((p) => p.id);
+  let employees = [];
+  if (plantIds.length) {
+    const { data } = await supabaseClient
+      .from("employees")
+      .select("*")
+      .in("plant_id", plantIds)
+      .order("name");
+    employees = data || [];
+  }
+
+  const plantOptions = regionPlants.map((p) => `<option value="${p.id}">${p.name}</option>`).join("");
+  const plantField =
+    regionPlants.length > 1
+      ? `<select id="newEmpPlant">${plantOptions}</select>`
+      : `<input type="hidden" id="newEmpPlant" value="${regionPlants[0] ? regionPlants[0].id : ""}">`;
+
+  const rows = employees
+    .map(
+      (e) => `
+    <div class="admin-emp-row">
+      <div class="admin-emp-name">${e.name}${e.is_active ? "" : " (inactive)"}</div>
+      <div class="admin-emp-email" id="emailView-${e.id}">${e.email}</div>
+      <input type="email" class="admin-email-input" id="emailInput-${e.id}" value="${e.email}" style="display:none;">
+      <div class="admin-emp-actions">
+        <button class="btn-secondary admin-edit-email" data-id="${e.id}">Email badlein</button>
+        ${
+          e.is_active
+            ? `<button class="btn-secondary admin-remove" data-id="${e.id}">Remove</button>`
+            : `<button class="btn-secondary admin-reactivate" data-id="${e.id}">Reactivate</button>`
+        }
+      </div>
+    </div>`
+    )
+    .join("");
+
+  panel.innerHTML = `
+    <h2>Sarla Employees — Manage</h2>
+    <div class="admin-add-form">
+      ${plantField}
+      <input type="text" id="newEmpName" placeholder="Naam">
+      <input type="email" id="newEmpEmail" placeholder="Gmail">
+      <button class="btn-primary" id="addEmpBtn">+ Employee Add Karein</button>
+      <div class="status-msg" id="adminAddStatus"></div>
+    </div>
+    <div class="admin-emp-list">${rows || '<div class="empty">Koi employee nahi hai.</div>'}</div>
+  `;
+
+  $("addEmpBtn").addEventListener("click", addSarlaEmployee);
+  document.querySelectorAll(".admin-edit-email").forEach((b) =>
+    b.addEventListener("click", () => toggleEmailEdit(b.dataset.id))
+  );
+  document.querySelectorAll(".admin-remove").forEach((b) =>
+    b.addEventListener("click", () => setEmployeeActive(b.dataset.id, false))
+  );
+  document.querySelectorAll(".admin-reactivate").forEach((b) =>
+    b.addEventListener("click", () => setEmployeeActive(b.dataset.id, true))
+  );
+}
+
+async function addSarlaEmployee() {
+  const name = $("newEmpName").value.trim();
+  const email = $("newEmpEmail").value.trim().toLowerCase();
+  const plantId = $("newEmpPlant").value;
+  const statusEl = $("adminAddStatus");
+
+  if (!name || !email || !plantId) {
+    statusEl.textContent = "Naam, email aur site zaroori hai.";
+    return;
+  }
+
+  statusEl.textContent = "Add ho raha hai...";
+  const { error } = await supabaseClient.from("employees").insert({ plant_id: plantId, name, email });
+  if (error) {
+    statusEl.textContent = "Fail: " + error.message;
+    return;
+  }
+
+  $("newEmpName").value = "";
+  $("newEmpEmail").value = "";
+  statusEl.textContent = "Add ho gaya ✔";
+  renderViewerData($("dateFilter").value);
+}
+
+function toggleEmailEdit(id) {
+  const view = $("emailView-" + id);
+  const input = $("emailInput-" + id);
+  const editing = input.style.display !== "none";
+
+  if (editing) {
+    input.style.display = "none";
+    view.style.display = "block";
+    return;
+  }
+
+  view.style.display = "none";
+  input.style.display = "block";
+  input.focus();
+  input.onkeydown = (e) => {
+    if (e.key === "Enter") saveEmail(id, input.value.trim().toLowerCase());
+  };
+}
+
+async function saveEmail(id, newEmail) {
+  if (!newEmail) return;
+  const { error } = await supabaseClient.from("employees").update({ email: newEmail }).eq("id", id);
+  if (error) {
+    alert("Email update fail hua: " + error.message);
+    return;
+  }
+  renderViewerData($("dateFilter").value);
+}
+
+async function setEmployeeActive(id, active) {
+  const msg = active ? "Is employee ko reactivate karna hai?" : "Is employee ko remove (soft) karna hai?";
+  if (!confirm(msg)) return;
+  const { error } = await supabaseClient.from("employees").update({ is_active: active }).eq("id", id);
+  if (error) {
+    alert("Fail hua: " + error.message);
+    return;
+  }
+  renderViewerData($("dateFilter").value);
 }
 
 function mapEmbedUrl(lat, lng) {
