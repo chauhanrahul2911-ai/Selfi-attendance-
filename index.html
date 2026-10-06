@@ -37,6 +37,14 @@
         </span>
         <img class="card-arrow" src="assets/icons/arrow.svg" alt="">
       </button>
+      <button class="btn-mode-dark accent-amber" id="modeAdminBtn">
+        <span class="card-icon-emoji">🛠️</span>
+        <span class="card-text">
+          <span class="card-label">Admin Panel</span>
+          <span class="card-sub">Sirf admins ke liye</span>
+        </span>
+        <img class="card-arrow" src="assets/icons/arrow.svg" alt="">
+      </button>
     </div>
     <div class="status-msg" id="landingStatus"></div>
   </section>
@@ -145,9 +153,19 @@
       </div>
       <div class="stats" id="statsRow"></div>
       <div class="sites" id="sitesWrap"></div>
-
-      <div id="adminPanel" style="display:none;"></div>
     </div>
+  </section>
+
+  <!-- ADMIN PANEL (standalone — admins table, Sarla employees only) -->
+  <section id="adminModeSection" style="display:none;">
+    <div class="topbar">
+      <button class="btn-back">← Back</button>
+      <button class="btn-signout">Sign out</button>
+    </div>
+    <div id="adminDenied" class="warning-banner" style="display:none;">
+      Aap admin nahi hain. Agar aapko admin access chahiye, existing admin se contact karein.
+    </div>
+    <div id="adminModeContent" style="display:none;"></div>
   </section>
 
 </div>
