@@ -152,10 +152,12 @@ function hideAllSections() {
   $("landingSection").style.display = "none";
   $("employeeSection").style.display = "none";
   $("viewerSection").style.display = "none";
+  $("adminModeSection").style.display = "none";
 }
 
 $("modeEmployeeBtn").addEventListener("click", () => enterMode("employee"));
 $("modeViewerBtn").addEventListener("click", () => enterMode("viewer"));
+$("modeAdminBtn").addEventListener("click", () => enterMode("admin"));
 
 document.querySelectorAll(".btn-back").forEach((b) =>
   b.addEventListener("click", () => {
@@ -199,6 +201,7 @@ async function enterMode(mode) {
   if (session) {
     currentUser = session.user;
     await routeToMode(mode);
+    sessionStorage.removeItem("attendance_mode");
   } else {
     $("landingStatus").textContent = "Redirecting to Google...";
     await supabaseClient.auth.signInWithOAuth({
@@ -233,6 +236,11 @@ async function routeToMode(mode) {
     return;
   }
 
+  if (mode === "admin") {
+    await loadAdminMode();
+    return;
+  }
+
   // employee mode
   $("employeeSection").style.display = "block";
 
@@ -255,21 +263,22 @@ async function routeToMode(mode) {
 }
 
 async function initAuth() {
-  const { data: { session } } = await supabaseClient.auth.getSession();
-  const savedMode = sessionStorage.getItem("attendance_mode");
-  if (session && savedMode) {
-    currentUser = session.user;
-    await routeToMode(savedMode);
-  } else {
-    hideAllSections();
-    $("landingSection").style.display = "block";
-  }
+  // Every plain page load/refresh starts at the landing screen — even if a
+  // Google session already exists. The only way to skip straight into a
+  // mode is finishing an OAuth redirect, handled below by onAuthStateChange.
+  hideAllSections();
+  $("landingSection").style.display = "block";
 }
 
-supabaseClient.auth.onAuthStateChange((_event, session) => {
-  if (session && !currentUser) {
+supabaseClient.auth.onAuthStateChange((event, session) => {
+  // Supabase also fires this with event "INITIAL_SESSION" on every load
+  // when a session already exists (not just after a fresh OAuth redirect).
+  // Only "SIGNED_IN" means "the user just finished logging in" — that's
+  // the one case we auto-continue into their chosen mode for.
+  if (event === "SIGNED_IN" && session && !currentUser) {
     currentUser = session.user;
     const savedMode = sessionStorage.getItem("attendance_mode") || "employee";
+    sessionStorage.removeItem("attendance_mode");
     routeToMode(savedMode);
   }
 });
@@ -887,23 +896,35 @@ async function renderViewerData(dateStr) {
       if (rec) openSelfieModal(rec, btn.dataset.name);
     });
   });
-
-  await renderAdminPanel(plants);
 }
 
 // ============================================
-// ADMIN PANEL — Sarla employees only (is_admin required)
+// STANDALONE ADMIN PANEL — gated by the admins table, Sarla employees only
 // ============================================
-async function renderAdminPanel(regionPlants) {
-  const panel = $("adminPanel");
-  const show = viewerRegion === "Sarla" && !!(currentEmployee && currentEmployee.is_admin);
-  if (!show) {
-    panel.style.display = "none";
-    panel.innerHTML = "";
+async function loadAdminMode() {
+  $("adminModeSection").style.display = "block";
+  $("adminDenied").style.display = "none";
+  $("adminModeContent").style.display = "none";
+  $("adminModeContent").innerHTML = "";
+
+  const email = (currentUser.email || "").trim().toLowerCase();
+  const { data: adminRow } = await supabaseClient
+    .from("admins")
+    .select("email")
+    .ilike("email", email)
+    .maybeSingle();
+
+  if (!adminRow) {
+    $("adminDenied").style.display = "block";
     return;
   }
-  panel.style.display = "block";
 
+  $("adminModeContent").style.display = "block";
+  const { data: sarlaPlants } = await supabaseClient.from("plants").select("*").eq("region", "Sarla");
+  await renderAdminPanel(sarlaPlants || [], $("adminModeContent"));
+}
+
+async function renderAdminPanel(regionPlants, container) {
   const plantIds = regionPlants.map((p) => p.id);
   let employees = [];
   if (plantIds.length) {
@@ -940,7 +961,7 @@ async function renderAdminPanel(regionPlants) {
     )
     .join("");
 
-  panel.innerHTML = `
+  container.innerHTML = `
     <h2>Sarla Employees — Manage</h2>
     <div class="admin-add-form">
       ${plantField}
@@ -985,7 +1006,7 @@ async function addSarlaEmployee() {
   $("newEmpName").value = "";
   $("newEmpEmail").value = "";
   statusEl.textContent = "Add ho gaya ✔";
-  renderViewerData($("dateFilter").value);
+  loadAdminMode();
 }
 
 function toggleEmailEdit(id) {
@@ -1014,7 +1035,7 @@ async function saveEmail(id, newEmail) {
     alert("Email update fail hua: " + error.message);
     return;
   }
-  renderViewerData($("dateFilter").value);
+  loadAdminMode();
 }
 
 async function setEmployeeActive(id, active) {
@@ -1025,7 +1046,7 @@ async function setEmployeeActive(id, active) {
     alert("Fail hua: " + error.message);
     return;
   }
-  renderViewerData($("dateFilter").value);
+  loadAdminMode();
 }
 
 function mapEmbedUrl(lat, lng) {
