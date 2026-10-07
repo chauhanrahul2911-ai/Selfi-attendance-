@@ -34,7 +34,8 @@ create table if not exists employees (
   device_id text,                       -- set automatically on first login
   device_fingerprint text,              -- backup device check (survives clearing site data)
   device_locked boolean default false,
-  is_admin boolean default false,       -- true = can also open the Viewer dashboard
+  is_admin boolean default false,       -- UNUSED by the app now — admin access is controlled
+                                         -- entirely by the separate `admins` table below
   is_active boolean default true,
   sort_order integer default 0,         -- Viewer shows employees of a site in this order (small number first)
   created_at timestamptz default now()
@@ -85,6 +86,12 @@ create table if not exists blocked_viewers (
   note text
 );
 
+create table if not exists admins (
+  email text primary key,          -- Admin Panel access — NOT tied to employees at all
+  added_at timestamptz default now(),
+  note text
+);
+
 -- ============================================
 -- 2. STORAGE BUCKET (manual step — dashboard se karna hai)
 -- ============================================
@@ -100,6 +107,7 @@ alter table plants enable row level security;
 alter table employees enable row level security;
 alter table attendance enable row level security;
 alter table blocked_viewers enable row level security;
+alter table admins enable row level security;
 
 -- PLANTS — sab dekh sakte hain, site info sensitive nahi hai
 drop policy if exists "plants_select" on plants;
@@ -155,6 +163,42 @@ drop policy if exists "blocked_viewers_select_own" on blocked_viewers;
 create policy "blocked_viewers_select_own" on blocked_viewers
   for select using (lower(auth.jwt() ->> 'email') = lower(email));
 
+-- ADMINS — koi bhi sirf apna khud ka admin-status check kar sake
+-- (poori list leak nahi hoti kisi aur user ko)
+drop policy if exists "admins_check_own_status" on admins;
+create policy "admins_check_own_status" on admins
+  for select using (lower(auth.jwt() ->> 'email') = lower(email));
+
+-- is_admin_user() — security definer function jo admins table check karta hai
+-- bina khud employees/admins ki RLS trigger kiye (warna infinite recursion hota hai
+-- jab employees policy khud employees ko query kare). Admin Panel ke insert/update
+-- yahi function use karte hain.
+create or replace function is_admin_user()
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from admins
+    where lower(email) = lower(auth.jwt() ->> 'email')
+  );
+$$;
+
+-- Admin Panel: naya employee add kar sake (koi bhi admin, app isko Sarla tak
+-- UI mein restrict karta hai — yeh policy khud kisi bhi plant ko allow karti hai)
+drop policy if exists "admin_insert_employees" on employees;
+create policy "admin_insert_employees" on employees
+  for insert to authenticated
+  with check (is_admin_user());
+
+-- Admin Panel: kisi bhi employee ka email badal sake / soft-remove (is_active) kar sake
+drop policy if exists "admin_update_employees" on employees;
+create policy "admin_update_employees" on employees
+  for update to authenticated
+  using (is_admin_user())
+  with check (is_admin_user());
+
 -- ============================================
 -- 4. STORAGE POLICIES (bucket bana lene ke BAAD chalao)
 -- ============================================
@@ -193,12 +237,19 @@ on conflict (name) do nothing;
 -- query chalao — iska output ready-made INSERT statements dega jo
 -- seedha copy-paste karke yahan neeche daal sakte ho:
 --
---   select 'insert into employees (plant_id, name, email, is_admin, is_active) '
+--   select 'insert into employees (plant_id, name, email, is_active, sort_order) '
 --     || 'select id, ''' || e.name || ''', ''' || e.email || ''', '
---     || e.is_admin || ', ' || e.is_active
+--     || e.is_active || ', ' || coalesce(e.sort_order, 0)
 --     || ' from plants where name = ''' || p.name || ''';' as insert_statement
 --   from employees e join plants p on p.id = e.plant_id
 --   order by p.name, e.name;
 --
 -- Result ka har row ek ready SQL statement hai — sabko copy karke
 -- yahan neeche paste kar dena.
+
+-- ============================================
+-- 7. ADMINS SEED — Admin Panel bootstrap karne ke liye kam se kam ek chahiye
+-- ============================================
+-- insert into admins (email) values
+--   ('apna-email@gmail.com')
+-- on conflict (email) do nothing;
