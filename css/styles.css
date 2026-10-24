@@ -611,3 +611,38 @@ tbody tr:last-child td{ border-bottom:none; }
   padding:6px 10px;
   font-size:12px;
 }
+
+/* ===== EXPORT BUTTON + MODAL ===== */
+.viewer-top-actions{
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+.btn-export{
+  width:auto;
+  margin:0;
+  background:var(--ink);
+  color:var(--white);
+  border:none;
+  padding:8px 12px;
+  border-radius:7px;
+  font-size:13px;
+  font-weight:600;
+}
+.export-label{
+  display:block;
+  font-size:12.5px;
+  color:var(--muted);
+  margin:12px 0 5px;
+}
+#exportModal select, #exportModal input[type="date"]{
+  width:100%;
+  border:1px solid var(--line);
+  border-radius:7px;
+  padding:9px 10px;
+  font-family:inherit;
+  font-size:13.5px;
+  background:var(--paper);
+  color:var(--ink);
+}
+#exportModal .btn-mark{ margin-top:16px; }
