@@ -18,6 +18,7 @@ let todayAttendance = null;  // existing attendance row for today, if any
 let attendanceMode = "in";   // "in" | "mid" | "out" | "done" — which punch the camera flow currently performs
 let lastAttendanceById = {}; // record id -> attendance row, for the Viewer's selfie modal
 let lastPlantsById = {};     // plant id -> plant row, so the modal knows 2 vs 3 punches
+let lastViewerEmployees = []; // employees shown in the current region, for the Export dropdown
 let viewerRegion = null;     // region the Viewer picked (e.g. "Jamjodhpur" / "Sarla")
 let viewerRegionPickerAvailable = false; // true only when an outsider saw the region picker
 
@@ -884,6 +885,11 @@ async function renderViewerData(dateStr) {
     sitesWrap.appendChild(card);
   });
 
+  const regionPlantIds = new Set(plants.map((p) => p.id));
+  lastViewerEmployees = employees
+    .filter((e) => regionPlantIds.has(e.plant_id))
+    .map((e) => ({ ...e, plantName: (lastPlantsById[e.plant_id] || {}).name || "" }));
+
   $("statsRow").innerHTML = `
     <div class="stat"><div class="label">Sites</div><div class="num blue">${plants.length}</div></div>
     <div class="stat"><div class="label">Present</div><div class="num green">${totalPresent}</div></div>
@@ -1133,6 +1139,155 @@ $("modalCloseBtn").addEventListener("click", () => {
   $("modalMidMapFrame").src = "";
   $("modalOutMapFrame").src = "";
 });
+
+// ============================================
+// PDF EXPORT
+// ============================================
+$("openExportBtn").addEventListener("click", () => {
+  const select = $("exportEmployeeSelect");
+  select.innerHTML = lastViewerEmployees
+    .map((e) => `<option value="${e.id}">${e.name} — ${e.plantName}</option>`)
+    .join("");
+
+  if (!$("exportEndDate").value) {
+    $("exportEndDate").value = getTodayIST();
+  }
+  if (!$("exportStartDate").value) {
+    const d = new Date();
+    d.setDate(d.getDate() - 29); // default: last 30 days
+    $("exportStartDate").value = d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  }
+  $("exportStatus").textContent = "";
+  $("exportModal").style.display = "flex";
+});
+
+$("exportModalCloseBtn").addEventListener("click", () => {
+  $("exportModal").style.display = "none";
+});
+
+$("exportGenerateBtn").addEventListener("click", generateAttendancePdf);
+
+function dateRangeArray(start, end) {
+  const dates = [];
+  let cur = new Date(start + "T00:00:00");
+  const last = new Date(end + "T00:00:00");
+  while (cur <= last) {
+    dates.push(cur.toLocaleDateString("en-CA"));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return dates;
+}
+
+async function generateAttendancePdf() {
+  const empId = $("exportEmployeeSelect").value;
+  const startDate = $("exportStartDate").value;
+  const endDate = $("exportEndDate").value;
+  const statusEl = $("exportStatus");
+
+  if (!empId) { statusEl.textContent = "Employee select karein."; return; }
+  if (!startDate || !endDate || startDate > endDate) {
+    statusEl.textContent = "Valid start aur end date daalein.";
+    return;
+  }
+
+  statusEl.textContent = "PDF ban rahi hai...";
+  $("exportGenerateBtn").disabled = true;
+
+  try {
+    const { data: emp } = await supabaseClient
+      .from("employees")
+      .select("*, plants(*)")
+      .eq("id", empId)
+      .maybeSingle();
+
+    if (!emp) throw new Error("Employee nahi mila.");
+
+    const { data: rows } = await supabaseClient
+      .from("attendance")
+      .select("*")
+      .eq("employee_id", empId)
+      .gte("attendance_date", startDate)
+      .lte("attendance_date", endDate)
+      .order("attendance_date");
+
+    const records = rows || [];
+    const byDate = {};
+    records.forEach((r) => { byDate[r.attendance_date] = r; });
+
+    const plant = emp.plants;
+    const is3 = !!plant && Number(plant.punches_per_day) === 3;
+    const allDates = dateRangeArray(startDate, endDate);
+
+    let presentCount = 0, flaggedCount = 0, totalMinutes = 0;
+    const tableRows = allDates.map((d) => {
+      const r = byDate[d];
+      if (!r) return [d, "—", ...(is3 ? ["—"] : []), "—", "0h 0m", "Absent"];
+
+      const isPresent = r.within_range === true;
+      if (isPresent) presentCount++;
+      if (r.status === "flagged") flaggedCount++;
+
+      let totalStr = "0h 0m";
+      if (r.clock_out_time) {
+        const mins = Math.round((new Date(r.clock_out_time) - new Date(r.clock_in_time)) / 60000);
+        totalMinutes += mins;
+        totalStr = `${Math.floor(mins / 60)}h ${mins % 60}m`;
+      }
+
+      const label = r.status === "ok" ? "Present" : r.status === "flagged" ? "Flagged" : "Present";
+      const row = [d, formatTime(r.clock_in_time)];
+      if (is3) row.push(r.mid_time ? formatTime(r.mid_time) : "—");
+      row.push(r.clock_out_time ? formatTime(r.clock_out_time) : "—", totalStr, label);
+      return row;
+    });
+
+    const absentCount = allDates.length - presentCount;
+    const totalH = Math.floor(totalMinutes / 60);
+    const totalM = totalMinutes % 60;
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+
+    doc.setFontSize(16);
+    doc.text("Attendance Report", 14, 18);
+    doc.setFontSize(10);
+    doc.setTextColor(90);
+    doc.text(`Employee: ${emp.name}`, 14, 27);
+    doc.text(`Site: ${plant ? plant.name : "—"}  (${plant ? plant.region : "—"})`, 14, 33);
+    doc.text(`Period: ${startDate} to ${endDate}`, 14, 39);
+    doc.text(`Generated: ${new Date().toLocaleString("en-IN")}`, 14, 45);
+
+    doc.setTextColor(0);
+    doc.setFontSize(11);
+    doc.text(
+      `Total days: ${allDates.length}   Present: ${presentCount}   Absent: ${absentCount}   ` +
+      `Flagged: ${flaggedCount}   Total hours: ${totalH}h ${totalM}m`,
+      14, 55
+    );
+
+    const head = is3
+      ? [["Date", "In", "Mid", "Out", "Total", "Status"]]
+      : [["Date", "In", "Out", "Total", "Status"]];
+
+    doc.autoTable({
+      head,
+      body: tableRows,
+      startY: 62,
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [20, 43, 39] }
+    });
+
+    const fileName = `${emp.name.replace(/\s+/g, "_")}_${startDate}_to_${endDate}.pdf`;
+    doc.save(fileName);
+
+    statusEl.textContent = "";
+    $("exportModal").style.display = "none";
+  } catch (e) {
+    statusEl.textContent = "Fail hua: " + (e.message || e);
+  } finally {
+    $("exportGenerateBtn").disabled = false;
+  }
+}
 
 // ============================================
 // INIT
